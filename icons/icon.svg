@@ -1,8 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="16" fill="#0d1117"/>
-  <circle cx="40" cy="80" r="20" fill="none" stroke="#58a6ff" stroke-width="4"/>
-  <circle cx="88" cy="80" r="20" fill="none" stroke="#58a6ff" stroke-width="4"/>
-  <path d="M40 80 L56 50 L72 50 L88 80" fill="none" stroke="#f85149" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M56 50 L64 30 L72 50" fill="none" stroke="#f85149" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="64" cy="26" r="6" fill="#ffd700"/>
+  <!-- Background with rounded corners -->
+  <rect width="128" height="128" rx="24" fill="#1a1a2e"/>
+
+  <!-- Outer glow ring -->
+  <circle cx="64" cy="64" r="46" fill="none" stroke="#ff6b35" stroke-width="5" opacity="0.25"/>
+
+  <!-- Main circular track/wheel with gap for arrow -->
+  <circle cx="64" cy="64" r="40" fill="none" stroke="#ff6b35" stroke-width="10"
+          stroke-dasharray="220 31" stroke-dashoffset="-15" stroke-linecap="round"/>
+
+  <!-- Replay arrow head -->
+  <path d="M64 22 L76 38 L52 38 Z" fill="#ff6b35"/>
+
+  <!-- Play triangle - larger and centered -->
+  <polygon points="52,42 52,86 88,64" fill="#ffffff"/>
 </svg>

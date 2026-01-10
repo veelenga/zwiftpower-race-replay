@@ -12,9 +12,16 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["**/tests/**/*.test.js"],
-    "moduleFileExtensions": ["js"],
-    "collectCoverageFrom": ["src/**/*.js", "!src/lib/**"]
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ],
+    "moduleFileExtensions": [
+      "js"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/lib/**"
+    ]
   },
   "repository": {
     "type": "git",
