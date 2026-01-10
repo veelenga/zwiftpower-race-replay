@@ -14,6 +14,10 @@ const {
   isValidPosition,
   lerp,
   clamp,
+  calcGroupAveragePower,
+  calcGroupAverageHR,
+  filterRidersByName,
+  highlightMatch,
   SECONDS_PER_MINUTE,
   DEFAULT_SPEED_KMH,
   GROUP_GAP_THRESHOLD_SECONDS,
@@ -307,5 +311,152 @@ describe('clamp', () => {
 
   test('clamps to max when above range', () => {
     expect(clamp(15, 0, 10)).toBe(10);
+  });
+});
+
+describe('calcGroupAveragePower', () => {
+  test('returns empty array for empty or null input', () => {
+    expect(calcGroupAveragePower([])).toEqual([]);
+    expect(calcGroupAveragePower(null)).toEqual([]);
+  });
+
+  test('calculates average power at each time index', () => {
+    const riders = [
+      { power: [100, 200, 300] },
+      { power: [200, 300, 400] },
+    ];
+    expect(calcGroupAveragePower(riders)).toEqual([150, 250, 350]);
+  });
+
+  test('handles different length power arrays', () => {
+    const riders = [
+      { power: [100, 200] },
+      { power: [200, 300, 400] },
+    ];
+    // At index 2, first rider has no data (0), second has 400
+    expect(calcGroupAveragePower(riders)).toEqual([150, 250, 200]);
+  });
+
+  test('handles missing power arrays', () => {
+    const riders = [
+      { power: [100, 200] },
+      { name: 'No power data' },
+    ];
+    expect(calcGroupAveragePower(riders)).toEqual([50, 100]);
+  });
+});
+
+describe('calcGroupAverageHR', () => {
+  test('returns 0 for empty or null input', () => {
+    expect(calcGroupAverageHR([], 0)).toBe(0);
+    expect(calcGroupAverageHR(null, 0)).toBe(0);
+  });
+
+  test('calculates average heart rate at specific index', () => {
+    const riders = [
+      { heartRate: [140, 150, 160] },
+      { heartRate: [160, 170, 180] },
+    ];
+    expect(calcGroupAverageHR(riders, 0)).toBe(150);
+    expect(calcGroupAverageHR(riders, 1)).toBe(160);
+    expect(calcGroupAverageHR(riders, 2)).toBe(170);
+  });
+
+  test('filters out zero values', () => {
+    const riders = [
+      { heartRate: [0, 150, 160] },
+      { heartRate: [160, 170, 0] },
+    ];
+    // At index 0, only second rider has valid HR
+    expect(calcGroupAverageHR(riders, 0)).toBe(160);
+    // At index 2, only first rider has valid HR
+    expect(calcGroupAverageHR(riders, 2)).toBe(160);
+  });
+
+  test('returns 0 when no valid HR data', () => {
+    const riders = [
+      { heartRate: [0, 0, 0] },
+      { heartRate: [0, 0, 0] },
+    ];
+    expect(calcGroupAverageHR(riders, 0)).toBe(0);
+  });
+
+  test('handles missing heartRate arrays', () => {
+    const riders = [
+      { heartRate: [140, 150] },
+      { name: 'No HR data' },
+    ];
+    expect(calcGroupAverageHR(riders, 0)).toBe(140);
+  });
+});
+
+describe('filterRidersByName', () => {
+  const riders = [
+    { name: 'John Smith' },
+    { name: 'Jane Doe' },
+    { name: 'Bob Johnson' },
+  ];
+
+  test('returns all riders for empty search', () => {
+    expect(filterRidersByName(riders, '')).toEqual(riders);
+    expect(filterRidersByName(riders, null)).toEqual(riders);
+    expect(filterRidersByName(riders, '   ')).toEqual(riders);
+  });
+
+  test('filters by partial name match', () => {
+    const result = filterRidersByName(riders, 'john');
+    expect(result.length).toBe(2);
+    expect(result.map(r => r.name)).toEqual(['John Smith', 'Bob Johnson']);
+  });
+
+  test('is case insensitive', () => {
+    expect(filterRidersByName(riders, 'JANE').length).toBe(1);
+    expect(filterRidersByName(riders, 'jane').length).toBe(1);
+    expect(filterRidersByName(riders, 'JaNe').length).toBe(1);
+  });
+
+  test('returns empty array for no matches', () => {
+    expect(filterRidersByName(riders, 'xyz')).toEqual([]);
+  });
+
+  test('handles null/undefined riders array', () => {
+    expect(filterRidersByName(null, 'john')).toEqual([]);
+    expect(filterRidersByName(undefined, 'john')).toEqual([]);
+  });
+});
+
+describe('highlightMatch', () => {
+  test('returns original name for empty search', () => {
+    expect(highlightMatch('John Smith', '')).toBe('John Smith');
+    expect(highlightMatch('John Smith', null)).toBe('John Smith');
+    expect(highlightMatch('John Smith', '   ')).toBe('John Smith');
+  });
+
+  test('wraps match in mark tags', () => {
+    const result = highlightMatch('John Smith', 'Smith');
+    expect(result).toContain('<mark');
+    expect(result).toContain('Smith');
+    expect(result).toContain('</mark>');
+  });
+
+  test('is case insensitive but preserves original case', () => {
+    const result = highlightMatch('John Smith', 'smith');
+    expect(result).toContain('Smith'); // Original case preserved
+    expect(result).toContain('John ');
+  });
+
+  test('highlights first occurrence', () => {
+    const result = highlightMatch('John John', 'John');
+    // Should highlight first John, not second
+    expect(result.indexOf('<mark')).toBe(0);
+  });
+
+  test('returns original if no match', () => {
+    expect(highlightMatch('John Smith', 'xyz')).toBe('John Smith');
+  });
+
+  test('handles null/undefined name', () => {
+    expect(highlightMatch(null, 'test')).toBe(null);
+    expect(highlightMatch(undefined, 'test')).toBe(undefined);
   });
 });

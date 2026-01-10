@@ -19,11 +19,8 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
    ```bash
    git clone https://github.com/veelenga/zwiftpower-race-reply.git
    ```
-
 2. Open Chrome and navigate to `chrome://extensions/`
-
 3. Enable "Developer mode" (toggle in top right)
-
 4. Click "Load unpacked" and select the `zwiftpower-race-replay` folder
 
 ### Firefox
@@ -34,11 +31,8 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
    cd zwiftpower-race-replay
    npm run build:firefox
    ```
-
 2. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`
-
 3. Click "Load Temporary Add-on..."
-
 4. Select the `manifest.json` file from the project folder
 
 > **Note**: To switch back to Chrome, run `npm run build:chrome`
@@ -46,15 +40,11 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
 ## Usage
 
 1. **Login to ZwiftPower**: Make sure you're logged into [zwiftpower.com](https://zwiftpower.com)
-
 2. **Navigate to a Race**: Go to any race results page (e.g., `zwiftpower.com/events.php?zid=XXXXX`)
-
 3. **Sync the Race**: Click the extension icon and press "Sync Race"
    - The extension syncs the top 50 riders + you (if outside top 50)
    - Progress is shown during sync
-
 4. **Open Replay**: Once synced, click "Replay" to open the visualization
-
 5. **Analyze**:
    - Use playback controls to navigate through the race
    - Click riders on the course profile or standings to change perspective
@@ -66,38 +56,3 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
 - All data is stored locally in your browser
 - The extension only accesses ZwiftPower when you explicitly sync a race
 - No data is sent to any external servers
-
-## Development
-
-```bash
-# Install dependencies (none required currently)
-
-# Load the extension in Chrome developer mode
-# Make changes and reload the extension to test
-```
-
-## Technical Details
-
-- **Manifest V3** browser extension (Chrome & Firefox)
-- Pure JavaScript (no framework dependencies)
-- Uses browser Storage API for local data persistence
-- Fetches data from ZwiftPower's internal API endpoints
-
-## Limitations
-
-- Requires ZwiftPower login (uses your authenticated session)
-- Syncs top 50 riders to avoid rate limiting
-- Race data is as accurate as ZwiftPower's analysis data
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details
-
-## Contributing
-
-Contributions welcome! Please feel free to submit issues and pull requests.
-
-## Acknowledgments
-
-- [ZwiftPower](https://zwiftpower.com) for providing race data
-- [Chart.js](https://www.chartjs.org/) for power visualization

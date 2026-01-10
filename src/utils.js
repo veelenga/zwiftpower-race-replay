@@ -248,6 +248,78 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+/**
+ * Calculate average power for a group of riders at each time index
+ * @param {Array} riders - Array of rider objects with power arrays
+ * @returns {Array} Array of average power values
+ */
+function calcGroupAveragePower(riders) {
+  if (!riders || riders.length === 0) return [];
+
+  const maxLen = Math.max(...riders.map(r => (r.power || []).length));
+  const avgPower = [];
+
+  for (let i = 0; i < maxLen; i++) {
+    const sum = riders.reduce((acc, r) => acc + ((r.power || [])[i] || 0), 0);
+    avgPower.push(Math.round(sum / riders.length));
+  }
+
+  return avgPower;
+}
+
+/**
+ * Calculate average heart rate for a group of riders at a specific index
+ * Filters out zero/invalid values before averaging
+ * @param {Array} riders - Array of rider objects with heartRate arrays
+ * @param {number} index - Time index to calculate average for
+ * @returns {number} Average heart rate, or 0 if no valid data
+ */
+function calcGroupAverageHR(riders, index) {
+  if (!riders || riders.length === 0) return 0;
+
+  const hrValues = riders
+    .map(r => (r.heartRate || [])[index])
+    .filter(v => v && v > 0);
+
+  if (hrValues.length === 0) return 0;
+  return Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length);
+}
+
+/**
+ * Filter riders by search term (case-insensitive)
+ * @param {Array} riders - Array of rider objects with name property
+ * @param {string} searchTerm - Search term
+ * @returns {Array} Filtered riders
+ */
+function filterRidersByName(riders, searchTerm) {
+  if (!riders) return [];
+  if (!searchTerm || !searchTerm.trim()) return riders;
+
+  const searchLower = searchTerm.toLowerCase().trim();
+  return riders.filter(r => r.name && r.name.toLowerCase().includes(searchLower));
+}
+
+/**
+ * Highlight matching text in a name string
+ * @param {string} name - Full name
+ * @param {string} searchTerm - Search term to highlight
+ * @returns {string} Name with HTML highlighting
+ */
+function highlightMatch(name, searchTerm) {
+  if (!name || !searchTerm || !searchTerm.trim()) return name;
+
+  const searchLower = searchTerm.toLowerCase().trim();
+  const idx = name.toLowerCase().indexOf(searchLower);
+
+  if (idx < 0) return name;
+
+  return name.slice(0, idx) +
+    '<mark style="background:#58a6ff33;color:#58a6ff;">' +
+    name.slice(idx, idx + searchTerm.length) +
+    '</mark>' +
+    name.slice(idx + searchTerm.length);
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -264,6 +336,10 @@ if (typeof module !== 'undefined' && module.exports) {
     isValidPosition,
     lerp,
     clamp,
+    calcGroupAveragePower,
+    calcGroupAverageHR,
+    filterRidersByName,
+    highlightMatch,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,

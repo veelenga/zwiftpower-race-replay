@@ -24,10 +24,32 @@
   </div>
 
   <div class="viz-area">
-    <!-- Course Profile -->
+    <!-- Course Profile with integrated stats -->
     <div class="course-profile">
       <div class="course-profile-header">
         <h3>Course Profile & Rider Positions</h3>
+        <div class="header-stats">
+          <div class="header-stat">
+            <span class="header-stat-value you" id="yourPosition">#-</span>
+            <span class="header-stat-label" id="positionLabel">Pos</span>
+          </div>
+          <div class="header-stat">
+            <span class="header-stat-value you" id="yourPower">-</span>
+            <span class="header-stat-label" id="powerLabel">W</span>
+          </div>
+          <div class="header-stat">
+            <span class="header-stat-value leader" id="leaderPower">-</span>
+            <span class="header-stat-label">Leader</span>
+          </div>
+          <div class="header-stat">
+            <span class="header-stat-value" id="gapToLeader">-</span>
+            <span class="header-stat-label">Gap</span>
+          </div>
+          <div class="header-stat">
+            <span class="header-stat-value" id="gapToGroup">-</span>
+            <span class="header-stat-label">Group</span>
+          </div>
+        </div>
         <div class="zoom-controls">
           <button class="zoom-btn" id="zoomResetBtn" disabled>Reset Zoom</button>
         </div>
@@ -63,41 +85,26 @@
       </div>
     </div>
 
-    <!-- Stats Row -->
-    <div class="stats-row">
-      <div class="stat-card highlight">
-        <div class="stat-value you" id="yourPosition">#-</div>
-        <div class="stat-label" id="positionLabel">Position</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value you" id="yourPower">-</div>
-        <div class="stat-label" id="powerLabel">Power (W)</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value leader" id="leaderPower">-</div>
-        <div class="stat-label">Leader Power (W)</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="gapToLeader">-</div>
-        <div class="stat-label">Gap to Leader</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="gapToGroup">-</div>
-        <div class="stat-label">Gap to Group</div>
-      </div>
-    </div>
-
     <!-- Details Row -->
     <div class="details-row">
-      <div class="panel">
+      <div class="panel standings-panel">
         <h3>Groups & Standings</h3>
+        <input type="text" class="rider-search" id="riderSearch" placeholder="Search rider...">
         <div class="compare-hint">Click group or rider to compare</div>
         <div class="standings-table" id="standings">Loading...</div>
       </div>
-      <div class="panel">
-        <h3>Power Comparison <span id="compareLabel">(vs Leader)</span></h3>
-        <div class="chart-container">
-          <canvas id="powerChart"></canvas>
+      <div class="charts-column">
+        <div class="panel chart-panel">
+          <h3>Power Comparison <span id="compareLabel">(vs Leader)</span></h3>
+          <div class="chart-container">
+            <canvas id="powerChart"></canvas>
+          </div>
+        </div>
+        <div class="panel chart-panel">
+          <h3>Heart Rate Comparison <span id="hrCompareLabel">(vs Leader)</span></h3>
+          <div class="chart-container">
+            <canvas id="hrChart"></canvas>
+          </div>
         </div>
       </div>
     </div>

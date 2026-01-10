@@ -9,8 +9,26 @@ const GROUP_GAP_THRESHOLD_SECONDS = 5;
 const DEFAULT_SPEED_KMH = 40;
 const MIN_SPEED_KMH = 10;
 const MIN_ZOOM_SELECTION_PX = 20;
-const ELEVATION_SVG_HEIGHT = 180;
-const CHART_UPDATE_INTERVAL_MS = 500; // Throttle chart updates for performance
+const CHART_UPDATE_INTERVAL_MS = 500;
+const CHART_WINDOW_SIZE_SECONDS = 600;
+const SECONDS_PER_MINUTE = 60;
+
+// Elevation profile constants
+const DEFAULT_ELEVATION_SVG_HEIGHT = 150;
+const DEFAULT_ELEVATION_CONTAINER_HEIGHT = 180;
+const ELEVATION_PATH_TOP_PADDING = 20;
+const ELEVATION_PATH_MAX_POINTS = 300;
+const MARKER_TOP_PADDING = 25;
+const MARKER_BOTTOM_PADDING = 10;
+
+// Chart axis limits
+const POWER_CHART_MIN = 0;
+const POWER_CHART_SUGGESTED_MAX = 500;
+const HR_CHART_MIN = 60;
+const HR_CHART_SUGGESTED_MAX = 200;
+
+// Chart data sampling
+const MIN_CHART_STEP_SECONDS = 10;
 
 const GROUP_COLORS = [
   '#ffd700', '#58a6ff', '#a371f7', '#3fb950', '#f0883e',
@@ -28,10 +46,12 @@ let playbackSpeed = 10;
 let lastFrameTime = null;
 let animationFrameId = null;
 let powerChart = null;
+let hrChart = null;
 let elevationData = [];
 let compareRiderPos = null;
 let compareGroupIdx = null;
 let expandedGroups = new Set();
+let riderSearchTerm = '';
 let zoomStart = 0;
 let zoomEnd = 1;
 let isDragging = false;
@@ -64,8 +84,11 @@ const elements = {
   positionLabel: document.getElementById('positionLabel'),
   powerLabel: document.getElementById('powerLabel'),
   standings: document.getElementById('standings'),
+  riderSearch: document.getElementById('riderSearch'),
   compareLabel: document.getElementById('compareLabel'),
+  hrCompareLabel: document.getElementById('hrCompareLabel'),
   powerChart: document.getElementById('powerChart'),
+  hrChart: document.getElementById('hrChart'),
   loadingOverlay: document.getElementById('loadingOverlay'),
   errorOverlay: document.getElementById('errorOverlay'),
   errorText: document.getElementById('errorText'),
@@ -214,6 +237,7 @@ async function loadRaceData() {
       zwiftId: r.zwiftId,
       duration: r.duration,
       power: r.power || [],
+      heartRate: r.heartRate || [],
       elevation: r.elevation || [],
       distance: r.distance || null,
       isCurrentUser: r.isCurrentUser,
@@ -241,6 +265,7 @@ async function loadRaceData() {
     populateRiderSelector();
     initElevation();
     initPowerChart();
+    initHRChart();
     update();
 
     elements.loadingOverlay.classList.add('hidden');
@@ -272,7 +297,7 @@ function initElevation() {
   const svg = elements.elevationSvg;
   const container = svg.parentElement;
   const width = container.clientWidth;
-  const height = ELEVATION_SVG_HEIGHT;
+  const height = svg.clientHeight || DEFAULT_ELEVATION_SVG_HEIGHT;
 
   if (!elevationData.length) return;
 
@@ -286,12 +311,12 @@ function initElevation() {
   const maxElev = Math.max(...zoomedData);
   const range = maxElev - minElev || 1;
 
-  const step = Math.max(1, Math.floor(zoomedData.length / 300));
+  const step = Math.max(1, Math.floor(zoomedData.length / ELEVATION_PATH_MAX_POINTS));
   let pathD = `M 0 ${height}`;
 
   for (let i = 0; i < zoomedData.length; i += step) {
     const x = (i / zoomedData.length) * width;
-    const y = height - ((zoomedData[i] - minElev) / range) * (height - 20);
+    const y = height - ((zoomedData[i] - minElev) / range) * (height - ELEVATION_PATH_TOP_PADDING);
     pathD += ` L ${x} ${y}`;
   }
   pathD += ` L ${width} ${height} Z`;
@@ -325,6 +350,132 @@ function updateDistanceMarkers() {
   `;
 }
 
+// Vertical line plugin for charts - shows on hover with values
+const verticalLinePlugin = {
+  id: 'verticalLine',
+  afterDraw: (chart) => {
+    const verticalLineOpts = chart.options.plugins.verticalLine;
+    if (!verticalLineOpts?.show || verticalLineOpts.cursorX === null) return;
+
+    const ctx = chart.ctx;
+    const xAxis = chart.scales.x;
+    const yAxis = chart.scales.y;
+
+    if (!xAxis || !yAxis) return;
+
+    const x = verticalLineOpts.cursorX;
+
+    // Only draw if x is within chart area
+    if (x < xAxis.left || x > xAxis.right) return;
+
+    // Draw vertical line
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, yAxis.top);
+    ctx.lineTo(x, yAxis.bottom);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.stroke();
+    ctx.restore();
+  }
+};
+
+// Get data values at cursor position
+function getChartValuesAtX(chart, x) {
+  const xAxis = chart.scales.x;
+  if (!xAxis || chart.data.labels.length === 0) return null;
+
+  // Find the closest data index to the cursor position
+  const dataIndex = Math.round(xAxis.getValueForPixel(x));
+  if (dataIndex < 0 || dataIndex >= chart.data.labels.length) return null;
+
+  const label = chart.data.labels[dataIndex];
+  const values = chart.data.datasets.map(ds => ({
+    label: ds.label,
+    value: ds.data[dataIndex],
+    color: ds.borderColor
+  }));
+
+  return { label, values, dataIndex };
+}
+
+// Shared tooltip element for charts
+let chartTooltip = null;
+
+function getChartTooltip() {
+  if (!chartTooltip) {
+    chartTooltip = document.createElement('div');
+    chartTooltip.className = 'chart-tooltip';
+    chartTooltip.style.cssText = `
+      position: fixed;
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: #f0f6fc;
+      pointer-events: none;
+      z-index: 1000;
+      display: none;
+      white-space: nowrap;
+    `;
+    document.body.appendChild(chartTooltip);
+  }
+  return chartTooltip;
+}
+
+function setupChartCursorTracking(chart, canvas) {
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+
+    // Update both charts with cursor position
+    if (powerChart) {
+      powerChart.options.plugins.verticalLine.cursorX = x;
+      powerChart.draw();
+    }
+    if (hrChart) {
+      hrChart.options.plugins.verticalLine.cursorX = x;
+      hrChart.draw();
+    }
+
+    // Show tooltip with values
+    const tooltip = getChartTooltip();
+    const data = getChartValuesAtX(chart, x);
+
+    if (data && data.values.length > 0) {
+      const unit = chart === powerChart ? 'W' : 'bpm';
+      let html = `<div style="color: #8b949e; margin-bottom: 4px;">${data.label}</div>`;
+      data.values.forEach(v => {
+        const val = v.value !== undefined && v.value !== null ? Math.round(v.value) : '-';
+        html += `<div><span style="color: ${v.color};">${v.label}:</span> ${val}${unit}</div>`;
+      });
+      tooltip.innerHTML = html;
+      tooltip.style.display = 'block';
+      tooltip.style.left = `${e.clientX + 12}px`;
+      tooltip.style.top = `${e.clientY - 10}px`;
+    } else {
+      tooltip.style.display = 'none';
+    }
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    // Hide line on both charts
+    if (powerChart) {
+      powerChart.options.plugins.verticalLine.cursorX = null;
+      powerChart.draw();
+    }
+    if (hrChart) {
+      hrChart.options.plugins.verticalLine.cursorX = null;
+      hrChart.draw();
+    }
+
+    // Hide tooltip
+    const tooltip = getChartTooltip();
+    tooltip.style.display = 'none';
+  });
+}
+
 // Power chart
 function initPowerChart() {
   const ctx = elements.powerChart.getContext('2d');
@@ -338,12 +489,42 @@ function initPowerChart() {
       interaction: { enabled: false },
       scales: {
         x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: '#21262d' } },
-        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, min: 0, suggestedMax: 500 },
+        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, min: POWER_CHART_MIN, suggestedMax: POWER_CHART_SUGGESTED_MAX },
       },
-      plugins: { legend: { display: true, labels: { color: '#c9d1d9', boxWidth: 12 } } },
+      plugins: {
+        legend: { display: true, labels: { color: '#c9d1d9', boxWidth: 12 } },
+        verticalLine: { show: true, cursorX: null }
+      },
       elements: { point: { radius: 0 }, line: { tension: 0.2 } },
     },
+    plugins: [verticalLinePlugin],
   });
+  setupChartCursorTracking(powerChart, elements.powerChart);
+}
+
+function initHRChart() {
+  const ctx = elements.hrChart.getContext('2d');
+  hrChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { enabled: false },
+      scales: {
+        x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: '#21262d' } },
+        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, min: HR_CHART_MIN, suggestedMax: HR_CHART_SUGGESTED_MAX },
+      },
+      plugins: {
+        legend: { display: true, labels: { color: '#c9d1d9', boxWidth: 12 } },
+        verticalLine: { show: true, cursorX: null }
+      },
+      elements: { point: { radius: 0 }, line: { tension: 0.2 } },
+    },
+    plugins: [verticalLinePlugin],
+  });
+  setupChartCursorTracking(hrChart, elements.hrChart);
 }
 
 // Main update loop
@@ -396,46 +577,78 @@ function update() {
   // Throttle chart updates during playback for better performance
   const now = Date.now();
   if (!isPlaying || now - lastChartUpdate >= CHART_UPDATE_INTERVAL_MS) {
-    updatePowerChart(t, you, getCompareTarget(groups, standings, leader));
+    const compareTarget = getCompareTarget(groups, standings, leader);
+    updatePowerChart(t, you, compareTarget);
+    updateHRChart(t, you, compareTarget);
     lastChartUpdate = now;
   }
 }
 
 function renderStandings(groups, standings) {
   let html = '';
+  const searchLower = riderSearchTerm.toLowerCase().trim();
 
   groups.forEach((group, gIdx) => {
+    // Filter riders in this group based on search
+    const filteredRiders = searchLower
+      ? group.riders.filter(r => r.name.toLowerCase().includes(searchLower))
+      : group.riders;
+
+    // Skip group if searching and no riders match
+    if (searchLower && filteredRiders.length === 0) return;
+
     const isGroupSelected = compareGroupIdx === gIdx;
     const isYourGroup = group.hasYou;
-    const isExpanded = isYourGroup || expandedGroups.has(gIdx);
+    // Auto-expand when searching, otherwise use normal logic
+    const isExpanded = searchLower || isYourGroup || expandedGroups.has(gIdx);
     const headerClasses = [
       'group-header',
       isGroupSelected ? 'selected' : '',
       isYourGroup ? 'your-group' : '',
     ].filter(Boolean).join(' ');
 
+    const displayCount = searchLower ? `${filteredRiders.length}/${group.riders.length}` : group.riders.length;
     const expandIcon = isExpanded ? '▼' : '▶';
     html += `
       <div class="${headerClasses}" data-group="${gIdx}">
-        <span class="group-name"><span class="expand-icon" data-toggle="${gIdx}">${expandIcon}</span> ${group.name} (${group.riders.length})${isYourGroup ? ' ★' : ''}</span>
+        <span class="group-name"><span class="expand-icon" data-toggle="${gIdx}">${expandIcon}</span> ${group.name} (${displayCount})${isYourGroup ? ' ★' : ''}</span>
         <span class="group-info">${group.avgPower}W avg ${formatTimeGap(group.timeGapToLeader)}</span>
       </div>`;
 
     if (isExpanded) {
-      group.riders.forEach((r) => {
+      const ridersToShow = searchLower ? filteredRiders : group.riders;
+      ridersToShow.forEach((r) => {
         const isYou = r.position === watchingPosition;
         const isSelected = r.position === compareRiderPos;
         const overallPos = standings.findIndex(s => s.position === r.position) + 1;
         const classes = ['standings-row', isYou ? 'you' : '', isSelected ? 'selected' : ''].filter(Boolean).join(' ');
+
+        // Highlight matching text
+        let displayName = r.name;
+        if (searchLower) {
+          const idx = r.name.toLowerCase().indexOf(searchLower);
+          if (idx >= 0) {
+            displayName = r.name.slice(0, idx) +
+              '<mark style="background:#58a6ff33;color:#58a6ff;">' +
+              r.name.slice(idx, idx + searchLower.length) +
+              '</mark>' +
+              r.name.slice(idx + searchLower.length);
+          }
+        }
+
         html += `
           <div class="${classes}" data-pos="${r.position}">
             <span class="pos">${overallPos}</span>
-            <span class="name">${r.name}</span>
+            <span class="name">${displayName}</span>
             <span class="power">${r.currentPower}W</span>
           </div>`;
       });
     }
   });
+
+  if (searchLower && !html) {
+    html = '<div style="color: #8b949e; padding: 10px; text-align: center;">No riders found</div>';
+  }
 
   elements.standings.innerHTML = html;
 
@@ -478,10 +691,22 @@ function getCompareTarget(groups, standings, leader) {
       const sum = group.riders.reduce((acc, r) => acc + (r.power[i] || 0), 0);
       avgPower.push(Math.round(sum / group.riders.length));
     }
-    return { name: group.name, power: avgPower, isGroup: true };
+    // Include riders array for HR calculation
+    return { name: group.name, power: avgPower, riders: group.riders, isGroup: true };
   }
   if (compareRiderPos) {
-    return standings.find(r => r.position === compareRiderPos);
+    const rider = standings.find(r => r.position === compareRiderPos);
+    // Ensure heartRate is available from original rider data
+    if (rider) {
+      const originalRider = riders.find(r => r.position === compareRiderPos);
+      rider.heartRate = originalRider?.heartRate || [];
+    }
+    return rider;
+  }
+  // For leader, ensure heartRate is available
+  if (leader) {
+    const originalLeader = riders.find(r => r.position === leader.position);
+    leader.heartRate = originalLeader?.heartRate || [];
   }
   return leader;
 }
@@ -497,7 +722,7 @@ function updateRiderMarkers(groups) {
   const maxElev = zoomedData.length ? Math.max(...zoomedData) : 100;
   const elevRange = maxElev - minElev || 1;
 
-  container.querySelectorAll('.rider-marker, .group-label, .rider-power-label').forEach(d => d.remove());
+  container.querySelectorAll('.rider-marker, .rider-power-label').forEach(el => el.remove());
 
   groups.forEach((group, gIdx) => {
     const color = GROUP_COLORS[gIdx % GROUP_COLORS.length];
@@ -508,26 +733,13 @@ function updateRiderMarkers(groups) {
 
     if (visibleRiders.length === 0) return;
 
-    const avgProgress = visibleRiders.reduce((sum, r) => sum + r.progress, 0) / visibleRiders.length;
-    const labelX = ((avgProgress - zoomStart) / (zoomEnd - zoomStart)) * width;
-
-    const label = document.createElement('div');
-    label.className = 'group-label';
-    label.style.left = `${Math.max(30, Math.min(width - 30, labelX))}px`;
-    label.style.top = '5px';
-    label.style.borderLeft = `3px solid ${color}`;
-    label.textContent = `G${gIdx + 1} (${group.riders.length})`;
-    if (group.hasYou) {
-      label.style.background = 'rgba(248, 81, 73, 0.8)';
-      label.textContent = `★ G${gIdx + 1} (${group.riders.length})`;
-    }
-    container.appendChild(label);
-
     visibleRiders.forEach((r) => {
       const x = ((r.progress - zoomStart) / (zoomEnd - zoomStart)) * width;
       const elevIdx = Math.floor(r.progress * (elevationData.length - 1));
       const elev = elevationData[elevIdx] || 0;
-      const y = 200 - ((elev - minElev) / elevRange) * 160 - 20;
+      const containerHeight = container.clientHeight || DEFAULT_ELEVATION_CONTAINER_HEIGHT;
+      const markerRange = containerHeight - MARKER_TOP_PADDING - MARKER_BOTTOM_PADDING;
+      const y = containerHeight - MARKER_BOTTOM_PADDING - ((elev - minElev) / elevRange) * markerRange;
 
       const dot = document.createElement('div');
       const isWatching = r.position === watchingPosition;
@@ -564,9 +776,8 @@ function updateRiderMarkers(groups) {
 function updatePowerChart(t, you, compareTarget) {
   if (!powerChart || !you || !compareTarget) return;
 
-  const windowSize = 600;
-  const start = Math.max(0, t - windowSize);
-  const step = Math.max(sampleInterval, 10); // At least sampleInterval
+  const start = Math.max(0, t - CHART_WINDOW_SIZE_SECONDS);
+  const step = Math.max(sampleInterval, MIN_CHART_STEP_SECONDS);
 
   const labels = [];
   const youData = [];
@@ -592,6 +803,46 @@ function updatePowerChart(t, you, compareTarget) {
     { label: compareName, data: compareData, borderColor: compareColor, borderWidth: 2, fill: false },
   ];
   powerChart.update('none');
+}
+
+function updateHRChart(t, you, compareTarget) {
+  if (!hrChart || !you || !compareTarget) return;
+
+  const start = Math.max(0, t - CHART_WINDOW_SIZE_SECONDS);
+  const step = Math.max(sampleInterval, MIN_CHART_STEP_SECONDS);
+
+  const labels = [];
+  const youData = [];
+  const compareData = [];
+
+  for (let i = start; i <= t; i += step) {
+    const idx = timeToIndex(i);
+    labels.push(formatTime(i));
+    youData.push(you.heartRate?.[idx] || 0);
+    // For groups, calculate average HR
+    if (compareTarget.isGroup && compareTarget.riders) {
+      const hrValues = compareTarget.riders
+        .map(r => r.heartRate?.[idx])
+        .filter(v => v && v > 0);
+      compareData.push(hrValues.length ? Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length) : 0);
+    } else {
+      compareData.push(compareTarget.heartRate?.[idx] || 0);
+    }
+  }
+
+  const compareName = compareTarget.isGroup
+    ? compareTarget.name
+    : compareTarget.name.split(' ')[0];
+  elements.hrCompareLabel.textContent = `(vs ${compareName})`;
+
+  const watchingName = getWatchingRiderName();
+  const compareColor = compareTarget.isGroup ? '#a371f7' : '#58a6ff';
+  hrChart.data.labels = labels;
+  hrChart.data.datasets = [
+    { label: watchingName, data: youData, borderColor: '#f85149', borderWidth: 2, fill: false },
+    { label: compareName, data: compareData, borderColor: compareColor, borderWidth: 2, fill: false },
+  ];
+  hrChart.update('none');
 }
 
 // Playback controls using requestAnimationFrame for smooth animation
@@ -647,6 +898,12 @@ function initEventListeners() {
   elements.resetBtn.onclick = () => { pause(); currentTime = 0; update(); };
   elements.timeSlider.oninput = (e) => { currentTime = +e.target.value; update(); };
   elements.riderSelect.onchange = (e) => selectRider(parseInt(e.target.value));
+
+  // Rider search
+  elements.riderSearch.oninput = (e) => {
+    riderSearchTerm = e.target.value;
+    update();
+  };
 
   document.querySelectorAll('[data-speed]').forEach(btn => {
     btn.onclick = (e) => {
@@ -767,6 +1024,7 @@ function updateRidersFromRaceData(raceData) {
     zwiftId: r.zwiftId,
     duration: r.duration,
     power: r.power || [],
+    heartRate: r.heartRate || [],
     elevation: r.elevation || [],
     distance: r.distance || null,
     isCurrentUser: r.isCurrentUser,
