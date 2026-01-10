@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Icon Generator</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background: #1a1a1a; color: #fff; }
+    canvas { border: 1px solid #333; margin: 10px; }
+    .download-links a { display: block; margin: 5px 0; color: #58a6ff; }
+  </style>
+</head>
+<body>
+  <h1>ZwiftPower Race Replay - Icon Generator</h1>
+  <p>Right-click each canvas and "Save image as..." to the icons folder</p>
+
+  <h3>16x16</h3>
+  <canvas id="icon16" width="16" height="16"></canvas>
+
+  <h3>48x48</h3>
+  <canvas id="icon48" width="48" height="48"></canvas>
+
+  <h3>128x128</h3>
+  <canvas id="icon128" width="128" height="128"></canvas>
+
+  <div class="download-links" id="links"></div>
+
+  <script>
+    const sizes = [16, 48, 128];
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+      <rect width="128" height="128" rx="16" fill="#0d1117"/>
+      <circle cx="40" cy="80" r="20" fill="none" stroke="#58a6ff" stroke-width="4"/>
+      <circle cx="88" cy="80" r="20" fill="none" stroke="#58a6ff" stroke-width="4"/>
+      <path d="M40 80 L56 50 L72 50 L88 80" fill="none" stroke="#f85149" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M56 50 L64 30 L72 50" fill="none" stroke="#f85149" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="64" cy="26" r="6" fill="#ffd700"/>
+    </svg>`;
+
+    const blob = new Blob([svg], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+
+    img.onload = () => {
+      const links = document.getElementById('links');
+
+      sizes.forEach(size => {
+        const canvas = document.getElementById(`icon${size}`);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, size, size);
+
+        const dataUrl = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = `icon${size}.png`;
+        link.textContent = `Download icon${size}.png`;
+        links.appendChild(link);
+      });
+    };
+
+    img.src = url;
+  </script>
+</body>
+</html>

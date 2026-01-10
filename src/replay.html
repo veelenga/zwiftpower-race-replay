@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Race Replay</title>
+  <script src="lib/chart.min.js"></script>
+  <link rel="stylesheet" href="replay.css">
+</head>
+<body>
+  <div class="header">
+    <h1>Race Replay</h1>
+    <span class="race-info" id="raceInfo">Loading...</span>
+    <div class="sync-badge hidden" id="syncBanner">
+      <span class="sync-icon"></span>
+      <span class="sync-text">Syncing...</span>
+    </div>
+    <div class="rider-selector">
+      <label>Watching:</label>
+      <select id="riderSelect">
+        <option value="">Loading...</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="viz-area">
+    <!-- Course Profile -->
+    <div class="course-profile">
+      <div class="course-profile-header">
+        <h3>Course Profile & Rider Positions</h3>
+        <div class="zoom-controls">
+          <button class="zoom-btn" id="zoomResetBtn" disabled>Reset Zoom</button>
+        </div>
+      </div>
+      <div class="elevation-container" id="elevationContainer">
+        <svg class="elevation-svg" id="elevationSvg" preserveAspectRatio="none"></svg>
+        <div class="zoom-selection" id="zoomSelection" style="display: none;"></div>
+        <div class="cursor-line" id="cursorLine"></div>
+        <div class="cursor-info" id="cursorInfo"></div>
+      </div>
+      <div class="distance-markers" id="distanceMarkers">
+        <span>0 km</span><span>10 km</span><span>20 km</span><span>30 km</span><span>42 km</span>
+      </div>
+    </div>
+
+    <!-- Timeline Controls -->
+    <div class="timeline">
+      <div class="timeline-row">
+        <div class="time-display" id="timeDisplay">0:00</div>
+        <div class="controls-group">
+          <button class="btn primary" id="playBtn">Play</button>
+          <button class="btn" id="resetBtn">Reset</button>
+        </div>
+        <div class="controls-group" id="speedControls">
+          <button class="btn" data-speed="1">1x</button>
+          <button class="btn" data-speed="5">5x</button>
+          <button class="btn active" data-speed="10">10x</button>
+          <button class="btn" data-speed="30">30x</button>
+        </div>
+        <div class="slider-container">
+          <input type="range" id="timeSlider" min="0" max="3600" value="0">
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="stats-row">
+      <div class="stat-card highlight">
+        <div class="stat-value you" id="yourPosition">#-</div>
+        <div class="stat-label" id="positionLabel">Position</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value you" id="yourPower">-</div>
+        <div class="stat-label" id="powerLabel">Power (W)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value leader" id="leaderPower">-</div>
+        <div class="stat-label">Leader Power (W)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="gapToLeader">-</div>
+        <div class="stat-label">Gap to Leader</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="gapToGroup">-</div>
+        <div class="stat-label">Gap to Group</div>
+      </div>
+    </div>
+
+    <!-- Details Row -->
+    <div class="details-row">
+      <div class="panel">
+        <h3>Groups & Standings</h3>
+        <div class="compare-hint">Click group or rider to compare</div>
+        <div class="standings-table" id="standings">Loading...</div>
+      </div>
+      <div class="panel">
+        <h3>Power Comparison <span id="compareLabel">(vs Leader)</span></h3>
+        <div class="chart-container">
+          <canvas id="powerChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="loading-content">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Loading race data...</div>
+    </div>
+  </div>
+
+  <div id="errorOverlay" class="error-overlay hidden">
+    <div class="error-content">
+      <div class="error-icon">!</div>
+      <div class="error-text" id="errorText">Error loading race</div>
+      <button class="btn" id="closeBtn">Close</button>
+    </div>
+  </div>
+
+  <script src="replay.js"></script>
+</body>
+</html>

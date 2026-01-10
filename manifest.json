@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "ZwiftPower Race Replay",
+  "version": "1.0.0",
+  "description": "Analyze and replay your Zwift races with detailed visualizations",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "activeTab",
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://zwiftpower.com/*"
+  ],
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://zwiftpower.com/*"],
+      "js": ["src/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/replay.html",
+        "src/replay.js",
+        "src/replay.css",
+        "src/lib/chart.min.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

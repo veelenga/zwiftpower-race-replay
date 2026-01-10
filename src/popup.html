@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZwiftPower Race Replay</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+    <header class="header">
+      <h1>Race Replay</h1>
+    </header>
+
+    <!-- Current Page Section -->
+    <section id="currentPageSection" class="section">
+      <h2>Current Page</h2>
+      <div id="pageStatus" class="status">
+        <span class="status-icon">...</span>
+        <span class="status-text">Checking page...</span>
+      </div>
+      <div id="syncControls" class="controls hidden">
+        <div class="race-info">
+          <div class="race-name" id="raceName">-</div>
+          <div class="race-meta" id="raceMeta">-</div>
+        </div>
+        <button id="syncBtn" class="btn btn-primary">
+          <span class="btn-text">Sync Race</span>
+          <span class="btn-spinner hidden"></span>
+        </button>
+      </div>
+      <div id="syncProgress" class="progress hidden">
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-row">
+          <div class="progress-text" id="progressText">Syncing...</div>
+          <button id="cancelBtn" class="btn btn-cancel hidden">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Synced Races Section -->
+    <section class="section">
+      <h2>Synced Races</h2>
+      <div id="raceList" class="race-list">
+        <div class="empty-state">No races synced yet</div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <a href="https://github.com/user/zwiftpower-race-replay" target="_blank">GitHub</a>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
