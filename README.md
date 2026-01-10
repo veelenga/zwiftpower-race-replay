@@ -13,11 +13,11 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
 
 ## Installation
 
-### From Source (Developer Mode)
+### Chrome
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/zwiftpower-race-replay.git
+   git clone https://github.com/veelenga/zwiftpower-race-reply.git
    ```
 
 2. Open Chrome and navigate to `chrome://extensions/`
@@ -26,9 +26,22 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
 
 4. Click "Load unpacked" and select the `zwiftpower-race-replay` folder
 
-### From Chrome Web Store
+### Firefox
 
-*Coming soon*
+1. Clone this repository and switch to the Firefox manifest:
+   ```bash
+   git clone https://github.com/veelenga/zwiftpower-race-reply.git
+   cd zwiftpower-race-replay
+   npm run build:firefox
+   ```
+
+2. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`
+
+3. Click "Load Temporary Add-on..."
+
+4. Select the `manifest.json` file from the project folder
+
+> **Note**: To switch back to Chrome, run `npm run build:chrome`
 
 ## Usage
 
@@ -37,7 +50,7 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
 2. **Navigate to a Race**: Go to any race results page (e.g., `zwiftpower.com/events.php?zid=XXXXX`)
 
 3. **Sync the Race**: Click the extension icon and press "Sync Race"
-   - The extension syncs the top 40 riders + you (if outside top 40)
+   - The extension syncs the top 50 riders + you (if outside top 50)
    - Progress is shown during sync
 
 4. **Open Replay**: Once synced, click "Replay" to open the visualization
@@ -65,15 +78,15 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
 
 ## Technical Details
 
-- **Manifest V3** Chrome extension
+- **Manifest V3** browser extension (Chrome & Firefox)
 - Pure JavaScript (no framework dependencies)
-- Uses Chrome Storage API for local data persistence
+- Uses browser Storage API for local data persistence
 - Fetches data from ZwiftPower's internal API endpoints
 
 ## Limitations
 
 - Requires ZwiftPower login (uses your authenticated session)
-- Syncs top 40 riders to avoid rate limiting
+- Syncs top 50 riders to avoid rate limiting
 - Race data is as accurate as ZwiftPower's analysis data
 
 ## License

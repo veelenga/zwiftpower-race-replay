@@ -6,7 +6,9 @@
   "scripts": {
     "lint": "echo 'No linter configured'",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "build:firefox": "cp manifest.firefox.json manifest.json && echo 'Switched to Firefox manifest'",
+    "build:chrome": "cp manifest.chrome.json manifest.json && echo 'Switched to Chrome manifest'"
   },
   "jest": {
     "testEnvironment": "node",
@@ -16,7 +18,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/zwiftpower-race-replay"
+    "url": "https://github.com/veelenga/zwiftpower-race-reply"
   },
   "keywords": [
     "zwift",
