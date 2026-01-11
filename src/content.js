@@ -11,6 +11,8 @@ const HIGHLIGHTED_ROW_CLASS = 'pointed';
 const FETCH_TIMEOUT_MS = 15000;
 const MAX_RETRIES = 2;
 const MAX_CONSECUTIVE_FAILURES = 5;
+const PROFILE_LINK_SELECTOR = 'a[href*="profile.php?z="]';
+const ZWIFT_ID_PATTERN = /z=(\d+)/;
 
 // Sync state
 let currentSyncAbortController = null;
@@ -31,85 +33,59 @@ function getEventName() {
   return titleEl?.textContent?.trim() || 'Unknown Race';
 }
 
-/**
- * Detect the active category from the page
- */
 function getActiveCategory() {
-  const hash = window.location.hash;
-  if (hash) {
-    const tabMatch = hash.match(/#tab_([a-z])/i);
-    if (tabMatch) {
-      const categoryId = tabMatch[1].toUpperCase();
-      const tabPane = document.querySelector(hash);
-      const table = tabPane?.querySelector('table');
-      if (table) {
-        return { categoryId, categoryName: `Category ${categoryId}`, table };
-      }
-    }
-  }
-
-  const activeTab = document.querySelector('.nav-tabs .nav-link.active, .nav-tabs .active a');
-  if (activeTab) {
-    const tabText = activeTab.textContent.trim();
-    const categoryMatch = tabText.match(/^([A-E])\b/i);
-    const categoryId = categoryMatch ? categoryMatch[1].toUpperCase() : null;
-
-    const tabId = activeTab.getAttribute('href') || activeTab.closest('a')?.getAttribute('href');
-    if (tabId && tabId.startsWith('#')) {
-      const tabPane = document.querySelector(tabId);
-      const table = tabPane?.querySelector('table');
-      if (table) {
-        return {
-          categoryId,
-          categoryName: categoryId ? `Category ${categoryId}` : tabText,
-          table,
-        };
-      }
-    }
-  }
-
-  const activePane = document.querySelector('.tab-pane.active, .tab-pane.show');
-  if (activePane) {
-    const paneId = activePane.id;
-    const categoryMatch = paneId?.match(/tab_([a-z])/i);
-    const categoryId = categoryMatch ? categoryMatch[1].toUpperCase() : null;
-    const table = activePane.querySelector('table');
-    if (table) {
-      return {
-        categoryId,
-        categoryName: categoryId ? `Category ${categoryId}` : 'Results',
-        table,
-      };
-    }
-  }
+  const categoryId = detectActiveCategoryId();
+  const categoryName = categoryId === 'ALL' ? 'All' : (categoryId ? `Category ${categoryId}` : null);
 
   const tables = document.querySelectorAll('table');
   for (const table of tables) {
-    if (table.offsetParent !== null) {
-      const hasProfileLinks = table.querySelector('a[href*="profile.php"]');
-      if (hasProfileLinks) {
-        return { categoryId: null, categoryName: 'Results', table };
-      }
+    if (table.offsetParent !== null && table.querySelector(PROFILE_LINK_SELECTOR)) {
+      return { categoryId, categoryName, table };
     }
   }
 
   return { categoryId: null, categoryName: null, table: null };
 }
 
-/**
- * Detect current user's Zwift ID
- */
+function detectActiveCategoryId() {
+  const CATEGORY_PATTERN = /^([A-E]|ALL)$/i;
+
+  const activeButtons = document.querySelectorAll('button.btn-primary[data-value], button.active[data-value]');
+  for (const btn of activeButtons) {
+    const value = btn.dataset.value;
+    if (value && CATEGORY_PATTERN.test(value)) {
+      return value.toUpperCase();
+    }
+  }
+
+  const hash = window.location.hash;
+  const hashMatch = hash.match(/[#_]([A-E])$/i);
+  if (hashMatch) {
+    return hashMatch[1].toUpperCase();
+  }
+
+  const urlMatch = window.location.search.match(/[?&]cat(?:egory)?=([A-E])/i);
+  if (urlMatch) {
+    return urlMatch[1].toUpperCase();
+  }
+
+  return null;
+}
+
 function detectCurrentUserZwiftId() {
-  const highlightedRow = document.querySelector(`tr.${HIGHLIGHTED_ROW_CLASS}`);
-  if (highlightedRow) {
-    const link = highlightedRow.querySelector('a[href*="profile.php"]');
-    const match = link?.href?.match(/z=(\d+)/);
+  const profileLinks = document.querySelectorAll(PROFILE_LINK_SELECTOR);
+
+  for (const link of profileLinks) {
+    if (link.closest('table')) continue;
+
+    const match = link.href.match(ZWIFT_ID_PATTERN);
     if (match) return match[1];
   }
 
-  const profileLink = document.querySelector('a[href*="profile.php?z="]');
-  if (profileLink) {
-    const match = profileLink.href.match(/z=(\d+)/);
+  const highlightedRow = document.querySelector(`tr.${HIGHLIGHTED_ROW_CLASS}`);
+  if (highlightedRow) {
+    const link = highlightedRow.querySelector(PROFILE_LINK_SELECTOR);
+    const match = link?.href?.match(ZWIFT_ID_PATTERN);
     if (match) return match[1];
   }
 
@@ -625,7 +601,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         riderCount: riders.length,
         syncCount: ridersToSync.length,
         isEventPage: true,
-        currentUserDetected: !!currentUserZwiftId,
+        userParticipates: riders.some(r => r.isCurrentUser),
         categoryId,
         categoryName,
       });

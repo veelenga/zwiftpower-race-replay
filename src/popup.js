@@ -9,9 +9,12 @@ const STORAGE_KEY_SYNC_STATUS = 'syncStatus';
 // DOM Elements
 const elements = {
   pageStatus: document.getElementById('pageStatus'),
+  refreshBtn: document.getElementById('refreshBtn'),
   syncControls: document.getElementById('syncControls'),
   raceName: document.getElementById('raceName'),
   raceMeta: document.getElementById('raceMeta'),
+  categoryBadge: document.getElementById('categoryBadge'),
+  raceTip: document.getElementById('raceTip'),
   syncBtn: document.getElementById('syncBtn'),
   syncProgress: document.getElementById('syncProgress'),
   progressFill: document.getElementById('progressFill'),
@@ -203,10 +206,24 @@ async function checkCurrentPage() {
 
     setPageStatus('success', 'Race page detected');
     elements.syncControls.classList.remove('hidden');
-    const categoryLabel = response.categoryName ? ` - ${response.categoryName}` : '';
-    elements.raceName.textContent = (response.eventName || `Event ${response.eventId}`) + categoryLabel;
-    const userStatus = response.currentUserDetected ? ' (you detected)' : '';
-    elements.raceMeta.textContent = `${response.riderCount} riders (syncing top ${response.syncCount})${userStatus}`;
+    elements.raceName.textContent = response.eventName || `Event ${response.eventId}`;
+
+    const isAllCategory = response.categoryId === 'ALL' || !response.categoryId;
+    if (response.categoryName) {
+      elements.categoryBadge.textContent = response.categoryName;
+      elements.categoryBadge.className = `category-badge${isAllCategory ? ' all' : ''}`;
+    } else {
+      elements.categoryBadge.textContent = '';
+    }
+
+    if (isAllCategory) {
+      elements.raceTip.classList.remove('hidden');
+    } else {
+      elements.raceTip.classList.add('hidden');
+    }
+
+    const userStatus = response.userParticipates ? ' (you participate)' : '';
+    elements.raceMeta.textContent = `${response.riderCount} riders${userStatus}`;
 
     // Check if already synced
     const existingRaces = await storage.getRaces();
@@ -324,7 +341,17 @@ async function loadRaceList() {
   const raceEntries = Object.entries(races);
 
   if (raceEntries.length === 0) {
-    elements.raceList.innerHTML = '<div class="empty-state">No races synced yet</div>';
+    elements.raceList.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+            <path d="M4.285 9.567a.5.5 0 0 1 .683.183A3.498 3.498 0 0 0 8 11.5a3.498 3.498 0 0 0 3.032-1.75.5.5 0 1 1 .866.5A4.498 4.498 0 0 1 8 12.5a4.498 4.498 0 0 1-3.898-2.25.5.5 0 0 1 .183-.683zM7 6.5C7 7.328 6.552 8 6 8s-1-.672-1-1.5S5.448 5 6 5s1 .672 1 1.5zm4 0c0 .828-.448 1.5-1 1.5s-1-.672-1-1.5S9.448 5 10 5s1 .672 1 1.5z"/>
+          </svg>
+        </div>
+        <div class="empty-text">No races synced yet</div>
+        <div class="empty-hint">Navigate to a ZwiftPower event page to sync</div>
+      </div>`;
     return;
   }
 
@@ -377,6 +404,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 document.addEventListener('DOMContentLoaded', async () => {
   elements.syncBtn.addEventListener('click', startSync);
   elements.cancelBtn.addEventListener('click', cancelSync);
+  elements.refreshBtn.addEventListener('click', checkCurrentPage);
   await checkCurrentPage();
   await loadRaceList();
 });
