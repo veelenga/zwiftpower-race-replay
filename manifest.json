@@ -28,7 +28,7 @@
   "content_scripts": [
     {
       "matches": ["https://zwiftpower.com/*"],
-      "js": ["src/content.js"],
+      "js": ["src/utils.js", "src/content.js"],
       "run_at": "document_idle"
     }
   ],
@@ -41,6 +41,7 @@
         "src/replay.html",
         "src/replay.js",
         "src/replay.css",
+        "src/utils.js",
         "src/lib/chart.min.js"
       ],
       "matches": ["<all_urls>"]

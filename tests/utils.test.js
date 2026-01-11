@@ -18,9 +18,15 @@ const {
   calcGroupAverageHR,
   filterRidersByName,
   highlightMatch,
+  isValidCategory,
+  parseCategoryFromHash,
+  parseCategoryFromUrl,
+  formatCategoryName,
+  parsePosition,
   SECONDS_PER_MINUTE,
   DEFAULT_SPEED_KMH,
   GROUP_GAP_THRESHOLD_SECONDS,
+  MAX_POSITION,
 } = require('../src/utils');
 
 describe('formatTime', () => {
@@ -458,5 +464,149 @@ describe('highlightMatch', () => {
   test('handles null/undefined name', () => {
     expect(highlightMatch(null, 'test')).toBe(null);
     expect(highlightMatch(undefined, 'test')).toBe(undefined);
+  });
+});
+
+describe('isValidCategory', () => {
+  test('returns true for valid categories A-E', () => {
+    expect(isValidCategory('A')).toBe(true);
+    expect(isValidCategory('B')).toBe(true);
+    expect(isValidCategory('C')).toBe(true);
+    expect(isValidCategory('D')).toBe(true);
+    expect(isValidCategory('E')).toBe(true);
+  });
+
+  test('returns true for ALL category', () => {
+    expect(isValidCategory('ALL')).toBe(true);
+    expect(isValidCategory('all')).toBe(true);
+    expect(isValidCategory('All')).toBe(true);
+  });
+
+  test('is case insensitive', () => {
+    expect(isValidCategory('a')).toBe(true);
+    expect(isValidCategory('b')).toBe(true);
+  });
+
+  test('returns false for invalid categories', () => {
+    expect(isValidCategory('F')).toBe(false);
+    expect(isValidCategory('Z')).toBe(false);
+    expect(isValidCategory('WATTS')).toBe(false);
+    expect(isValidCategory('123')).toBe(false);
+    expect(isValidCategory('')).toBeFalsy();
+    expect(isValidCategory(null)).toBeFalsy();
+    expect(isValidCategory(undefined)).toBeFalsy();
+  });
+});
+
+describe('parseCategoryFromHash', () => {
+  test('parses #A format', () => {
+    expect(parseCategoryFromHash('#A')).toBe('A');
+    expect(parseCategoryFromHash('#B')).toBe('B');
+  });
+
+  test('parses #_A format', () => {
+    expect(parseCategoryFromHash('#_A')).toBe('A');
+    expect(parseCategoryFromHash('#_E')).toBe('E');
+  });
+
+  test('is case insensitive and returns uppercase', () => {
+    expect(parseCategoryFromHash('#a')).toBe('A');
+    expect(parseCategoryFromHash('#_b')).toBe('B');
+  });
+
+  test('returns null for invalid hash', () => {
+    expect(parseCategoryFromHash('')).toBe(null);
+    expect(parseCategoryFromHash(null)).toBe(null);
+    expect(parseCategoryFromHash('#ALL')).toBe(null);
+    expect(parseCategoryFromHash('#123')).toBe(null);
+    expect(parseCategoryFromHash('#')).toBe(null);
+  });
+});
+
+describe('parseCategoryFromUrl', () => {
+  test('parses ?cat=A format', () => {
+    expect(parseCategoryFromUrl('?cat=A')).toBe('A');
+    expect(parseCategoryFromUrl('?cat=B')).toBe('B');
+  });
+
+  test('parses ?category=A format', () => {
+    expect(parseCategoryFromUrl('?category=A')).toBe('A');
+    expect(parseCategoryFromUrl('?category=E')).toBe('E');
+  });
+
+  test('parses with other query params', () => {
+    expect(parseCategoryFromUrl('?foo=bar&cat=C')).toBe('C');
+    expect(parseCategoryFromUrl('?category=D&other=value')).toBe('D');
+  });
+
+  test('is case insensitive and returns uppercase', () => {
+    expect(parseCategoryFromUrl('?cat=a')).toBe('A');
+    expect(parseCategoryFromUrl('?category=b')).toBe('B');
+  });
+
+  test('returns null for invalid search', () => {
+    expect(parseCategoryFromUrl('')).toBe(null);
+    expect(parseCategoryFromUrl(null)).toBe(null);
+    expect(parseCategoryFromUrl('?foo=bar')).toBe(null);
+    expect(parseCategoryFromUrl('?cat=F')).toBe(null);
+    expect(parseCategoryFromUrl('?category=Z')).toBe(null);
+  });
+});
+
+describe('formatCategoryName', () => {
+  test('formats A-E categories', () => {
+    expect(formatCategoryName('A')).toBe('Category A');
+    expect(formatCategoryName('B')).toBe('Category B');
+    expect(formatCategoryName('E')).toBe('Category E');
+  });
+
+  test('formats ALL as All', () => {
+    expect(formatCategoryName('ALL')).toBe('All');
+  });
+
+  test('returns null for null/undefined', () => {
+    expect(formatCategoryName(null)).toBe(null);
+    expect(formatCategoryName(undefined)).toBe(null);
+    expect(formatCategoryName('')).toBe(null);
+  });
+});
+
+describe('parsePosition', () => {
+  test('parses valid positions', () => {
+    expect(parsePosition('1')).toBe(1);
+    expect(parsePosition('50')).toBe(50);
+    expect(parsePosition('200')).toBe(200);
+  });
+
+  test('trims whitespace', () => {
+    expect(parsePosition('  5  ')).toBe(5);
+    expect(parsePosition('\t10\n')).toBe(10);
+  });
+
+  test('returns null for zero', () => {
+    expect(parsePosition('0')).toBe(null);
+  });
+
+  test('returns null for positions exceeding max', () => {
+    expect(parsePosition('201')).toBe(null);
+    expect(parsePosition('500')).toBe(null);
+  });
+
+  test('respects custom maxPosition', () => {
+    expect(parsePosition('50', 100)).toBe(50);
+    expect(parsePosition('150', 100)).toBe(null);
+  });
+
+  test('returns null for non-numeric strings', () => {
+    expect(parsePosition('abc')).toBe(null);
+    expect(parsePosition('12a')).toBe(null);
+    expect(parsePosition('1.5')).toBe(null);
+    expect(parsePosition('-1')).toBe(null);
+  });
+
+  test('returns null for empty/null/undefined', () => {
+    expect(parsePosition('')).toBe(null);
+    expect(parsePosition(null)).toBe(null);
+    expect(parsePosition(undefined)).toBe(null);
   });
 });

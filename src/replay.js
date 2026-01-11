@@ -3,15 +3,13 @@
  * Loads race data from extension storage and renders interactive replay
  */
 
-// Constants
+// Storage key (shared with other modules)
 const STORAGE_KEY_RACES = 'syncedRaces';
-const GROUP_GAP_THRESHOLD_SECONDS = 5;
-const DEFAULT_SPEED_KMH = 40;
-const MIN_SPEED_KMH = 10;
+
+// Replay-specific constants
 const MIN_ZOOM_SELECTION_PX = 20;
 const CHART_UPDATE_INTERVAL_MS = 500;
 const CHART_WINDOW_SIZE_SECONDS = 600;
-const SECONDS_PER_MINUTE = 60;
 
 // Elevation profile constants
 const DEFAULT_ELEVATION_SVG_HEIGHT = 150;
@@ -97,94 +95,9 @@ const elements = {
 // Current event ID for storage listener
 let currentEventId = null;
 
-// Utility functions
-const formatTime = (s) => {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${String(sec).padStart(2, '0')}`;
-};
-
-const formatTimeGap = (seconds) => {
-  if (seconds <= 0) return '-';
-  if (seconds < 60) return `+${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `+${m}:${String(s).padStart(2, '0')}`;
-};
-
-// Convert real time (seconds) to data array index
-const timeToIndex = (t) => Math.floor(t / sampleInterval);
-
 function getWatchingRiderName() {
   const rider = riders.find(r => r.position === watchingPosition);
   return rider ? rider.name.split(' ')[0] : 'Rider';
-}
-
-function calcSpeed(rider, t) {
-  if (!rider.distance || t < 3) return DEFAULT_SPEED_KMH;
-  const idx = timeToIndex(t);
-  const idx1 = Math.max(0, idx - 1);
-  const d1 = rider.distance[idx1] || 0;
-  const d2 = rider.distance[idx] || d1;
-  const timeDiff = sampleInterval; // Time between samples
-  const speedKmPerSec = (d2 - d1) / timeDiff;
-  const speedKmh = speedKmPerSec * 3600;
-  return Math.max(speedKmh, MIN_SPEED_KMH);
-}
-
-function calcTimeGapFromDistance(distanceKm, trailingRider, t) {
-  const speedKmh = calcSpeed(trailingRider, t);
-  const timeHours = distanceKm / speedKmh;
-  return Math.round(timeHours * 3600);
-}
-
-function calcTimeGap(riderA, riderB, t) {
-  if (t === 0) return 0;
-  const distA = riderA.currentDistance ?? riderA.distance?.[t] ?? 0;
-  const distB = riderB.currentDistance ?? riderB.distance?.[t] ?? 0;
-  const distanceKm = distA - distB;
-  return calcTimeGapFromDistance(distanceKm, riderB, t);
-}
-
-function detectGroups(standings, t) {
-  if (standings.length === 0) return [];
-
-  const groups = [];
-  let currentGroup = [standings[0]];
-
-  for (let i = 1; i < standings.length; i++) {
-    const prevRider = standings[i - 1];
-    const rider = standings[i];
-    const distanceGapKm = prevRider.currentDistance - rider.currentDistance;
-    const timeGap = calcTimeGapFromDistance(distanceGapKm, rider, t);
-
-    if (timeGap <= GROUP_GAP_THRESHOLD_SECONDS) {
-      currentGroup.push(rider);
-    } else {
-      groups.push(currentGroup);
-      currentGroup = [rider];
-    }
-  }
-
-  if (currentGroup.length > 0) {
-    groups.push(currentGroup);
-  }
-
-  const leader = standings[0];
-
-  return groups.map((groupRiders, idx) => {
-    const avgPower = Math.round(groupRiders.reduce((sum, r) => sum + r.currentPower, 0) / groupRiders.length);
-    const timeGapToLeader = idx === 0 ? 0 : calcTimeGap(leader, groupRiders[0], t);
-    const hasYou = groupRiders.some(r => r.position === watchingPosition);
-    return {
-      idx,
-      riders: groupRiders,
-      avgPower,
-      timeGapToLeader,
-      hasYou,
-      name: idx === 0 ? 'Lead Group' : `Group ${idx + 1}`,
-    };
-  });
 }
 
 function selectRider(pos) {
@@ -227,9 +140,7 @@ async function loadRaceData() {
       elements.syncBanner.classList.add('hidden');
     }
 
-    // Get sample interval from first rider (default to 1 for old data)
     sampleInterval = raceData.riders[0]?.sampleInterval || 1;
-    console.log(`[Replay] Sample interval: ${sampleInterval}`);
 
     riders = raceData.riders.map(r => ({
       position: r.position,
@@ -269,9 +180,8 @@ async function loadRaceData() {
     update();
 
     elements.loadingOverlay.classList.add('hidden');
-    console.log(`Loaded ${riders.length} riders, duration: ${formatTime(maxTime)}`);
   } catch (error) {
-    console.error('Error loading race:', error);
+    console.log('[Replay] Failed to load race:', error.message);
     showError('Failed to load race data');
   }
 }
@@ -530,7 +440,7 @@ function initHRChart() {
 // Main update loop
 function update() {
   const t = currentTime;
-  const idx = timeToIndex(t);
+  const idx = timeToIndex(t, sampleInterval);
   elements.timeDisplay.textContent = formatTime(t);
   elements.timeSlider.value = t;
 
@@ -551,17 +461,17 @@ function update() {
   elements.positionLabel.textContent = `${watchingName}'s Position`;
   elements.powerLabel.textContent = `${watchingName}'s Power (W)`;
 
-  const groups = detectGroups(standings, t);
+  const groups = detectGroups(standings, t, watchingPosition, sampleInterval);
 
   if (you && leader && you !== leader) {
-    const timeToLeader = calcTimeGap(leader, you, t);
+    const timeToLeader = calcTimeGap(leader, you, t, sampleInterval);
     elements.gapToLeader.textContent = formatTimeGap(timeToLeader);
 
     const yourGroupIdx = groups.findIndex(g => g.hasYou);
     if (yourGroupIdx > 0) {
       const groupAhead = groups[yourGroupIdx - 1];
       const lastRiderInGroupAhead = groupAhead.riders[groupAhead.riders.length - 1];
-      const timeToGroup = calcTimeGap(lastRiderInGroupAhead, you, t);
+      const timeToGroup = calcTimeGap(lastRiderInGroupAhead, you, t, sampleInterval);
       elements.gapToGroup.textContent = formatTimeGap(timeToGroup);
     } else {
       elements.gapToGroup.textContent = '-';
@@ -784,7 +694,7 @@ function updatePowerChart(t, you, compareTarget) {
   const compareData = [];
 
   for (let i = start; i <= t; i += step) {
-    const idx = timeToIndex(i);
+    const idx = timeToIndex(i, sampleInterval);
     labels.push(formatTime(i));
     youData.push(you.power[idx] || 0);
     compareData.push(compareTarget.power[idx] || 0);
@@ -816,7 +726,7 @@ function updateHRChart(t, you, compareTarget) {
   const compareData = [];
 
   for (let i = start; i <= t; i += step) {
-    const idx = timeToIndex(i);
+    const idx = timeToIndex(i, sampleInterval);
     labels.push(formatTime(i));
     youData.push(you.heartRate?.[idx] || 0);
     // For groups, calculate average HR

@@ -320,6 +320,66 @@ function highlightMatch(name, searchTerm) {
     name.slice(idx + searchTerm.length);
 }
 
+const CATEGORY_PATTERN = /^([A-E]|ALL)$/i;
+const HASH_CATEGORY_PATTERN = /[#_]([A-E])$/i;
+const URL_CATEGORY_PATTERN = /[?&]cat(?:egory)?=([A-E])/i;
+
+/**
+ * Check if a value is a valid race category
+ * @param {string} value - Value to check
+ * @returns {boolean} Whether value is a valid category (A-E or ALL)
+ */
+function isValidCategory(value) {
+  return value && CATEGORY_PATTERN.test(value);
+}
+
+/**
+ * Parse category from URL hash
+ * @param {string} hash - URL hash (e.g., "#_A" or "#B")
+ * @returns {string|null} Category letter in uppercase or null
+ */
+function parseCategoryFromHash(hash) {
+  if (!hash) return null;
+  const match = hash.match(HASH_CATEGORY_PATTERN);
+  return match ? match[1].toUpperCase() : null;
+}
+
+/**
+ * Parse category from URL query string
+ * @param {string} search - URL search string (e.g., "?cat=A" or "?category=B")
+ * @returns {string|null} Category letter in uppercase or null
+ */
+function parseCategoryFromUrl(search) {
+  if (!search) return null;
+  const match = search.match(URL_CATEGORY_PATTERN);
+  return match ? match[1].toUpperCase() : null;
+}
+
+/**
+ * Format category ID into display name
+ * @param {string} categoryId - Category ID (A-E or ALL)
+ * @returns {string|null} Display name (e.g., "Category A" or "All")
+ */
+function formatCategoryName(categoryId) {
+  if (!categoryId) return null;
+  return categoryId === 'ALL' ? 'All' : `Category ${categoryId}`;
+}
+
+/**
+ * Parse position from text
+ * Returns position if it's a valid number within range, null otherwise
+ * @param {string} text - Text to parse
+ * @param {number} maxPosition - Maximum valid position
+ * @returns {number|null} Position number or null
+ */
+function parsePosition(text, maxPosition = MAX_POSITION) {
+  if (!text) return null;
+  const trimmed = text.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const pos = parseInt(trimmed, 10);
+  return pos > 0 && pos <= maxPosition ? pos : null;
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -340,6 +400,11 @@ if (typeof module !== 'undefined' && module.exports) {
     calcGroupAverageHR,
     filterRidersByName,
     highlightMatch,
+    isValidCategory,
+    parseCategoryFromHash,
+    parseCategoryFromUrl,
+    formatCategoryName,
+    parsePosition,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,
@@ -348,5 +413,8 @@ if (typeof module !== 'undefined' && module.exports) {
     MIN_SPEED_KMH,
     GROUP_GAP_THRESHOLD_SECONDS,
     MAX_POSITION,
+    CATEGORY_PATTERN,
+    HASH_CATEGORY_PATTERN,
+    URL_CATEGORY_PATTERN,
   };
 }

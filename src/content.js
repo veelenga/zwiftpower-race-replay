@@ -13,6 +13,10 @@ const MAX_RETRIES = 2;
 const MAX_CONSECUTIVE_FAILURES = 5;
 const PROFILE_LINK_SELECTOR = 'a[href*="profile.php?z="]';
 const ZWIFT_ID_PATTERN = /z=(\d+)/;
+const TABLE_LOAD_TIMEOUT_MS = 5000;
+const PAGE_INFO_TIMEOUT_MS = 3000;
+const TABLE_POLL_INTERVAL_MS = 200;
+const MAX_VALID_POSITION = 200;
 
 // Sync state
 let currentSyncAbortController = null;
@@ -35,7 +39,7 @@ function getEventName() {
 
 function getActiveCategory() {
   const categoryId = detectActiveCategoryId();
-  const categoryName = categoryId === 'ALL' ? 'All' : (categoryId ? `Category ${categoryId}` : null);
+  const categoryName = formatCategoryName(categoryId);
 
   const tables = document.querySelectorAll('table');
   for (const table of tables) {
@@ -48,26 +52,19 @@ function getActiveCategory() {
 }
 
 function detectActiveCategoryId() {
-  const CATEGORY_PATTERN = /^([A-E]|ALL)$/i;
-
   const activeButtons = document.querySelectorAll('button.btn-primary[data-value], button.active[data-value]');
   for (const btn of activeButtons) {
     const value = btn.dataset.value;
-    if (value && CATEGORY_PATTERN.test(value)) {
+    if (isValidCategory(value)) {
       return value.toUpperCase();
     }
   }
 
-  const hash = window.location.hash;
-  const hashMatch = hash.match(/[#_]([A-E])$/i);
-  if (hashMatch) {
-    return hashMatch[1].toUpperCase();
-  }
+  const hashCategory = parseCategoryFromHash(window.location.hash);
+  if (hashCategory) return hashCategory;
 
-  const urlMatch = window.location.search.match(/[?&]cat(?:egory)?=([A-E])/i);
-  if (urlMatch) {
-    return urlMatch[1].toUpperCase();
-  }
+  const urlCategory = parseCategoryFromUrl(window.location.search);
+  if (urlCategory) return urlCategory;
 
   return null;
 }
@@ -92,10 +89,7 @@ function detectCurrentUserZwiftId() {
   return null;
 }
 
-/**
- * Wait for table data to load
- */
-async function waitForTableData(maxWaitMs = 5000) {
+async function waitForTableData(maxWaitMs = TABLE_LOAD_TIMEOUT_MS) {
   const startTime = Date.now();
 
   while (Date.now() - startTime < maxWaitMs) {
@@ -112,33 +106,61 @@ async function waitForTableData(maxWaitMs = 5000) {
       return true;
     }
 
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, TABLE_POLL_INTERVAL_MS));
   }
 
   return false;
 }
 
-/**
- * Extract Zwift ID from a profile link
- */
-function extractZwiftId(href) {
-  let match = href.match(/[?&]z=(\d+)/);
-  if (match) return match[1];
 
-  match = href.match(/\/profile\/(\d+)/);
-  if (match) return match[1];
+function findPositionFromCells(cells) {
+  if (cells[0]) {
+    const firstCellPos = parsePosition(cells[0].textContent, MAX_VALID_POSITION);
+    if (firstCellPos) return firstCellPos;
+  }
 
-  match = href.match(/zwift_id=(\d+)/);
-  if (match) return match[1];
+  for (const cell of cells) {
+    const pos = parsePosition(cell.textContent, MAX_VALID_POSITION);
+    if (pos) return pos;
+  }
 
   return null;
 }
 
-/**
- * Get list of riders from the active category table
- */
+function findPositionFromRow(row) {
+  const cells = row.querySelectorAll('td');
+  const cellPosition = findPositionFromCells(cells);
+  if (cellPosition) return cellPosition;
+
+  const tbody = row.closest('tbody');
+  if (tbody) {
+    const rows = [...tbody.querySelectorAll('tr')];
+    const rowIndex = rows.indexOf(row) + 1;
+    return rowIndex <= MAX_VALID_POSITION ? rowIndex : null;
+  }
+
+  return null;
+}
+
+function parseRiderFromRow(row, link, currentUserZwiftId) {
+  const position = findPositionFromRow(row);
+  if (!position) return null;
+
+  const zwiftId = extractZwiftId(link.href);
+  if (!zwiftId) return null;
+
+  const name = link.textContent.trim();
+  if (!name) return null;
+
+  return {
+    position,
+    name,
+    zwiftId,
+    isCurrentUser: zwiftId === currentUserZwiftId,
+  };
+}
+
 function getRidersFromPage() {
-  const riders = [];
   const currentUserZwiftId = detectCurrentUserZwiftId();
   const { categoryId, categoryName, table } = getActiveCategory();
 
@@ -150,56 +172,20 @@ function getRidersFromPage() {
     'a[href*="profile.php"], a[href*="/profile/"], a[href*="zwift_id"]'
   );
 
-  profileLinks.forEach((link) => {
+  const seenZwiftIds = new Set();
+  const riders = [];
+
+  for (const link of profileLinks) {
     const row = link.closest('tr');
-    if (!row) return;
+    if (!row) continue;
 
-    const cells = row.querySelectorAll('td');
-    let position = null;
+    const rider = parseRiderFromRow(row, link, currentUserZwiftId);
+    if (!rider) continue;
+    if (seenZwiftIds.has(rider.zwiftId)) continue;
 
-    if (cells[0]) {
-      const firstCellText = cells[0].textContent.trim();
-      const posMatch = firstCellText.match(/^(\d+)$/);
-      if (posMatch) {
-        position = parseInt(posMatch[1], 10);
-      }
-    }
-
-    if (!position) {
-      for (const cell of cells) {
-        const text = cell.textContent.trim();
-        if (/^\d+$/.test(text) && parseInt(text, 10) <= 200) {
-          position = parseInt(text, 10);
-          break;
-        }
-      }
-    }
-
-    if (!position) {
-      const tbody = row.closest('tbody');
-      if (tbody) {
-        const rows = [...tbody.querySelectorAll('tr')];
-        position = rows.indexOf(row) + 1;
-      }
-    }
-
-    if (!position || position > 200) return;
-
-    const zwiftId = extractZwiftId(link.href);
-    if (!zwiftId) return;
-
-    const name = link.textContent.trim();
-    if (!name) return;
-
-    if (riders.some(r => r.zwiftId === zwiftId)) return;
-
-    riders.push({
-      position,
-      name,
-      zwiftId,
-      isCurrentUser: zwiftId === currentUserZwiftId,
-    });
-  });
+    seenZwiftIds.add(rider.zwiftId);
+    riders.push(rider);
+  }
 
   return {
     riders: riders.sort((a, b) => a.position - b.position),
@@ -209,27 +195,6 @@ function getRidersFromPage() {
   };
 }
 
-/**
- * Select riders to sync, prioritizing current user first
- */
-function selectRidersToSync(allRiders) {
-  const currentUser = allRiders.find(r => r.isCurrentUser);
-  const topRiders = allRiders.slice(0, MAX_RIDERS_TO_SYNC);
-
-  // Add current user if not already in top riders
-  if (currentUser && !topRiders.some(r => r.zwiftId === currentUser.zwiftId)) {
-    topRiders.push(currentUser);
-  }
-
-  // Reorder to put current user first
-  if (currentUser) {
-    const reordered = topRiders.filter(r => r.zwiftId === currentUser.zwiftId);
-    reordered.push(...topRiders.filter(r => r.zwiftId !== currentUser.zwiftId));
-    return reordered;
-  }
-
-  return topRiders;
-}
 
 /**
  * Fetch with timeout
@@ -262,9 +227,7 @@ async function fetchRiderAnalysis(zwiftId, eventId, retries = MAX_RETRIES) {
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      // Check if sync was cancelled
       if (currentSyncAbortController?.signal.aborted) {
-        console.log(`[ZP Replay] Sync cancelled, skipping rider ${zwiftId}`);
         return null;
       }
 
@@ -277,7 +240,7 @@ async function fetchRiderAnalysis(zwiftId, eventId, retries = MAX_RETRIES) {
       });
 
       if (!response.ok) {
-        console.warn(`[ZP Replay] HTTP ${response.status} for rider ${zwiftId} (attempt ${attempt + 1})`);
+        console.log(`[ZP Replay] HTTP ${response.status} for rider ${zwiftId}`);
         if (attempt < retries && response.status >= 500) {
           await delay(DELAY_BETWEEN_REQUESTS_MS);
           continue;
@@ -294,7 +257,7 @@ async function fetchRiderAnalysis(zwiftId, eventId, retries = MAX_RETRIES) {
       try {
         data = JSON.parse(text);
       } catch {
-        console.warn(`[ZP Replay] Invalid JSON for rider ${zwiftId}`);
+        console.log(`[ZP Replay] Invalid JSON for rider ${zwiftId}`);
         return null;
       }
 
@@ -312,7 +275,7 @@ async function fetchRiderAnalysis(zwiftId, eventId, retries = MAX_RETRIES) {
         totalDistance: data.xData?.[data.xData.length - 1] || 0,
       };
     } catch (error) {
-      console.error(`[ZP Replay] Failed to fetch rider ${zwiftId} (attempt ${attempt + 1}):`, error.message);
+      console.log(`[ZP Replay] Fetch failed for rider ${zwiftId}: ${error.message}`);
       if (attempt < retries) {
         await delay(DELAY_BETWEEN_REQUESTS_MS);
         continue;
@@ -363,26 +326,16 @@ function cancelSync() {
   if (currentSyncAbortController) {
     currentSyncAbortController.abort();
     currentSyncAbortController = null;
-    console.log('[ZP Replay] Sync cancelled');
   }
 }
 
-/**
- * Sync race data - main sync function with incremental support
- */
-async function syncRaceData() {
-  // Cancel any previous sync
-  cancelSync();
-
-  // Create new abort controller for this sync
-  currentSyncAbortController = new AbortController();
-
+async function prepareSyncContext() {
   const eventId = getEventIdFromUrl();
   if (!eventId) {
     throw new Error('Not on a ZwiftPower event page');
   }
 
-  await waitForTableData(5000);
+  await waitForTableData(TABLE_LOAD_TIMEOUT_MS);
 
   const eventName = getEventName();
   const { riders: allRiders, currentUserZwiftId, categoryId, categoryName } = getRidersFromPage();
@@ -391,115 +344,90 @@ async function syncRaceData() {
     throw new Error('No riders found in category.');
   }
 
-  const ridersToSync = selectRidersToSync(allRiders);
+  const ridersToSync = selectRidersToSync(allRiders, MAX_RIDERS_TO_SYNC);
   const fullEventName = categoryName ? `${eventName} - ${categoryName}` : eventName;
   const fullEventId = categoryId ? `${eventId}_${categoryId}` : eventId;
 
-  // Load existing race data for incremental sync
   const existingRace = await getExistingRaceData(fullEventId);
   const existingRiderIds = new Set(existingRace?.riders?.map(r => r.zwiftId) || []);
-
-  // Filter out already synced riders
   const newRidersToSync = ridersToSync.filter(r => !existingRiderIds.has(r.zwiftId));
 
-  console.log(`[ZP Replay] Event: ${fullEventId}`);
-  console.log(`[ZP Replay] Total riders to sync: ${ridersToSync.length}`);
-  console.log(`[ZP Replay] Already synced: ${existingRiderIds.size}`);
-  console.log(`[ZP Replay] New riders to fetch: ${newRidersToSync.length}`);
+  return {
+    eventId,
+    fullEventId,
+    fullEventName,
+    allRiders,
+    ridersToSync,
+    newRidersToSync,
+    existingRace,
+    currentUserZwiftId,
+    categoryId,
+    categoryName,
+  };
+}
 
-  // If all riders already synced, we're done
-  if (newRidersToSync.length === 0) {
-    await updateSyncStatus({
-      status: 'complete',
-      eventId: fullEventId,
-      eventName: fullEventName,
-      successfulSyncs: existingRace.riders.length,
-      totalRiders: allRiders.length,
-      errors: 0,
-      message: 'All riders already synced',
-    });
-    return existingRace;
-  }
+function createRiderWithAnalysis(rider, analysis) {
+  return {
+    position: rider.position,
+    name: rider.name,
+    zwiftId: rider.zwiftId,
+    isCurrentUser: rider.isCurrentUser,
+    ...analysis,
+  };
+}
 
-  // FAIL EARLY: Test first rider to check if analysis data is available
-  console.log(`[ZP Replay] Testing data availability with first rider...`);
+function createRaceResult(ctx, riderData, errors, syncProgress, syncInProgress) {
+  return {
+    eventId: ctx.fullEventId,
+    eventName: ctx.fullEventName,
+    riders: riderData,
+    errors,
+    totalRiders: ctx.allRiders.length,
+    syncedRiders: ctx.ridersToSync.length,
+    successfulSyncs: riderData.length,
+    currentUserZwiftId: ctx.currentUserZwiftId,
+    categoryId: ctx.categoryId,
+    categoryName: ctx.categoryName,
+    syncedAt: new Date().toISOString(),
+    syncInProgress,
+    syncProgress,
+  };
+}
+
+async function checkDataAvailability(ctx) {
   await updateSyncStatus({
     status: 'checking',
-    eventId: fullEventId,
-    eventName: fullEventName,
+    eventId: ctx.fullEventId,
+    eventName: ctx.fullEventName,
     message: 'Checking if race data is available...',
   });
 
-  const testRider = newRidersToSync[0];
-  const testAnalysis = await fetchRiderAnalysis(testRider.zwiftId, eventId);
+  const testRider = ctx.newRidersToSync[0];
+  const testAnalysis = await fetchRiderAnalysis(testRider.zwiftId, ctx.eventId);
 
   if (!testAnalysis) {
     throw new Error('Race analysis not ready yet. ZwiftPower may still be processing - try again later.');
   }
 
-  // Start with existing riders or empty array
-  const riderData = [...(existingRace?.riders || [])];
-  const errors = [];
+  return { testRider, testAnalysis };
+}
 
-  // Add the test rider we already fetched
-  riderData.push({
-    position: testRider.position,
-    name: testRider.name,
-    zwiftId: testRider.zwiftId,
-    isCurrentUser: testRider.isCurrentUser,
-    ...testAnalysis,
-  });
-
-  // Save immediately so user can start watching
-  let raceResult = {
-    eventId: fullEventId,
-    eventName: fullEventName,
-    riders: riderData,
-    errors,
-    totalRiders: allRiders.length,
-    syncedRiders: ridersToSync.length,
-    successfulSyncs: riderData.length,
-    currentUserZwiftId,
-    categoryId,
-    categoryName,
-    syncedAt: new Date().toISOString(),
-    syncInProgress: true,
-    syncProgress: {
-      current: 1,
-      total: newRidersToSync.length,
-    },
-  };
-  await saveRaceData(raceResult);
-
-  // Update status
-  await updateSyncStatus({
-    status: 'syncing',
-    eventId: fullEventId,
-    eventName: fullEventName,
-    current: 1,
-    total: newRidersToSync.length,
-    riderName: testRider.name,
-    riderPosition: testRider.position,
-  });
-
-  // Sync remaining new riders (skip first since we already fetched it)
+async function syncRemainingRiders(ctx, riderData, errors, startIndex) {
   let consecutiveFailures = 0;
 
-  for (let i = 1; i < newRidersToSync.length; i++) {
-    // Check if sync was cancelled
+  for (let i = startIndex; i < ctx.newRidersToSync.length; i++) {
     if (currentSyncAbortController?.signal.aborted) {
-      console.log('[ZP Replay] Sync aborted by user');
       break;
     }
 
-    const rider = newRidersToSync[i];
+    const rider = ctx.newRidersToSync[i];
 
     await updateSyncStatus({
       status: 'syncing',
-      eventId: fullEventId,
-      eventName: fullEventName,
+      eventId: ctx.fullEventId,
+      eventName: ctx.fullEventName,
       current: i + 1,
-      total: newRidersToSync.length,
+      total: ctx.newRidersToSync.length,
       riderName: rider.name,
       riderPosition: rider.position,
       consecutiveFailures,
@@ -507,67 +435,83 @@ async function syncRaceData() {
 
     await delay(DELAY_BETWEEN_REQUESTS_MS);
 
-    const analysis = await fetchRiderAnalysis(rider.zwiftId, eventId);
+    const analysis = await fetchRiderAnalysis(rider.zwiftId, ctx.eventId);
 
     if (analysis) {
       consecutiveFailures = 0;
-      riderData.push({
-        position: rider.position,
-        name: rider.name,
-        zwiftId: rider.zwiftId,
-        isCurrentUser: rider.isCurrentUser,
-        ...analysis,
-      });
+      riderData.push(createRiderWithAnalysis(rider, analysis));
 
-      // Save after each successful fetch so replay updates in real-time
-      raceResult = {
-        ...raceResult,
-        riders: riderData,
-        successfulSyncs: riderData.length,
-        syncedAt: new Date().toISOString(),
-        syncProgress: {
-          current: i + 1,
-          total: newRidersToSync.length,
-        },
-      };
+      const progress = { current: i + 1, total: ctx.newRidersToSync.length };
+      const raceResult = createRaceResult(ctx, riderData, errors, progress, true);
       await saveRaceData(raceResult);
     } else {
       consecutiveFailures++;
       errors.push(rider.position);
 
-      // Stop if too many consecutive failures
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        console.error(`[ZP Replay] Too many consecutive failures (${consecutiveFailures}), stopping sync`);
         await updateSyncStatus({
           status: 'error',
           error: `Sync stopped: ${consecutiveFailures} consecutive failures. Try again later.`,
-          eventId: fullEventId,
-          eventName: fullEventName,
+          eventId: ctx.fullEventId,
+          eventName: ctx.fullEventName,
         });
         break;
       }
     }
   }
+}
 
-  // Final save with sync complete
-  raceResult = {
-    ...raceResult,
-    riders: riderData,
-    errors,
-    successfulSyncs: riderData.length,
-    syncedAt: new Date().toISOString(),
-    syncInProgress: false,
-  };
+async function syncRaceData() {
+  cancelSync();
+  currentSyncAbortController = new AbortController();
+
+  const ctx = await prepareSyncContext();
+
+  if (ctx.newRidersToSync.length === 0) {
+    await updateSyncStatus({
+      status: 'complete',
+      eventId: ctx.fullEventId,
+      eventName: ctx.fullEventName,
+      successfulSyncs: ctx.existingRace.riders.length,
+      totalRiders: ctx.allRiders.length,
+      errors: 0,
+      message: 'All riders already synced',
+    });
+    return ctx.existingRace;
+  }
+
+  const { testRider, testAnalysis } = await checkDataAvailability(ctx);
+
+  const riderData = [...(ctx.existingRace?.riders || [])];
+  const errors = [];
+
+  riderData.push(createRiderWithAnalysis(testRider, testAnalysis));
+
+  const initialProgress = { current: 1, total: ctx.newRidersToSync.length };
+  let raceResult = createRaceResult(ctx, riderData, errors, initialProgress, true);
   await saveRaceData(raceResult);
 
-  console.log(`[ZP Replay] Sync complete: ${riderData.length} riders, ${errors.length} errors`);
+  await updateSyncStatus({
+    status: 'syncing',
+    eventId: ctx.fullEventId,
+    eventName: ctx.fullEventName,
+    current: 1,
+    total: ctx.newRidersToSync.length,
+    riderName: testRider.name,
+    riderPosition: testRider.position,
+  });
+
+  await syncRemainingRiders(ctx, riderData, errors, 1);
+
+  raceResult = createRaceResult(ctx, riderData, errors, null, false);
+  await saveRaceData(raceResult);
 
   await updateSyncStatus({
     status: 'complete',
-    eventId: fullEventId,
-    eventName: fullEventName,
+    eventId: ctx.fullEventId,
+    eventName: ctx.fullEventName,
     successfulSyncs: riderData.length,
-    totalRiders: allRiders.length,
+    totalRiders: ctx.allRiders.length,
     errors: errors.length,
   });
 
@@ -590,10 +534,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      await waitForTableData(3000);
+      await waitForTableData(PAGE_INFO_TIMEOUT_MS);
 
-      const { riders, currentUserZwiftId, categoryId, categoryName } = getRidersFromPage();
-      const ridersToSync = selectRidersToSync(riders);
+      const { riders, categoryId, categoryName } = getRidersFromPage();
+      const ridersToSync = selectRidersToSync(riders, MAX_RIDERS_TO_SYNC);
 
       sendResponse({
         eventId,

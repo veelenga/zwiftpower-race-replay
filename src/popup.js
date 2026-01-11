@@ -237,7 +237,7 @@ async function checkCurrentPage() {
       updateSyncProgress(syncStatus);
     }
   } catch (error) {
-    console.error('Error checking page:', error);
+    console.log('[Popup] Error checking page:', error.message);
     setPageStatus('error', 'Could not read page');
 
     // Still check for ongoing sync
@@ -257,13 +257,10 @@ async function checkCurrentPage() {
  */
 async function startSync() {
   if (!currentTabId) {
-    // Check if there's already a sync in progress
     const syncStatus = await storage.getSyncStatus();
     if (syncStatus && syncStatus.status === 'syncing') {
-      console.log('Sync already in progress');
       return;
     }
-    console.error('No tab ID available');
     return;
   }
 
@@ -276,43 +273,31 @@ async function startSync() {
   });
 }
 
-/**
- * Cancel ongoing sync
- */
 async function cancelSync() {
   if (!currentTabId) {
-    console.error('No tab ID available');
     return;
   }
 
-  try {
-    // Send cancel command to content script via background
-    chrome.runtime.sendMessage({
-      action: 'cancelSync',
-      tabId: currentTabId,
-    });
+  chrome.runtime.sendMessage({
+    action: 'cancelSync',
+    tabId: currentTabId,
+  });
 
-    // Update UI immediately
-    const btnText = elements.syncBtn.querySelector('.btn-text');
-    const btnSpinner = elements.syncBtn.querySelector('.btn-spinner');
+  const btnText = elements.syncBtn.querySelector('.btn-text');
+  const btnSpinner = elements.syncBtn.querySelector('.btn-spinner');
 
-    elements.syncBtn.disabled = false;
-    btnText.textContent = 'Sync Cancelled';
-    btnSpinner.classList.add('hidden');
-    elements.cancelBtn.classList.add('hidden');
-    elements.progressText.textContent = 'Sync cancelled by user';
+  elements.syncBtn.disabled = false;
+  btnText.textContent = 'Sync Cancelled';
+  btnSpinner.classList.add('hidden');
+  elements.cancelBtn.classList.add('hidden');
+  elements.progressText.textContent = 'Sync cancelled by user';
 
-    // Clear sync status
-    await storage.clearSyncStatus();
+  await storage.clearSyncStatus();
 
-    // Reset button after delay
-    setTimeout(() => {
-      btnText.textContent = 'Re-sync Race';
-      elements.syncProgress.classList.add('hidden');
-    }, 2000);
-  } catch (error) {
-    console.error('Failed to cancel sync:', error);
-  }
+  setTimeout(() => {
+    btnText.textContent = 'Re-sync Race';
+    elements.syncProgress.classList.add('hidden');
+  }, 2000);
 }
 
 /**
