@@ -17,7 +17,7 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/veelenga/zwiftpower-race-reply.git
+   git clone https://github.com/veelenga/zwiftpower-race-replay.git
    ```
 2. Open Chrome and navigate to `chrome://extensions/`
 3. Enable "Developer mode" (toggle in top right)
@@ -27,7 +27,7 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
 
 1. Clone this repository and switch to the Firefox manifest:
    ```bash
-   git clone https://github.com/veelenga/zwiftpower-race-reply.git
+   git clone https://github.com/veelenga/zwiftpower-race-replay.git
    cd zwiftpower-race-replay
    npm run build:firefox
    ```

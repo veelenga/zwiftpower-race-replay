@@ -17,6 +17,7 @@ const TABLE_LOAD_TIMEOUT_MS = 5000;
 const PAGE_INFO_TIMEOUT_MS = 3000;
 const TABLE_POLL_INTERVAL_MS = 200;
 const MAX_VALID_POSITION = 200;
+const MAX_SYNCED_RACES = 15;
 
 // Sync state
 let currentSyncAbortController = null;
@@ -310,11 +311,26 @@ async function getExistingRaceData(eventId) {
 }
 
 /**
- * Save race data to storage
+ * Save race data to storage, enforcing max limit
  */
 async function saveRaceData(raceData) {
   const existing = await chrome.storage.local.get('syncedRaces');
   const races = existing.syncedRaces || {};
+
+  // If adding a new race and at limit, remove oldest
+  if (!races[raceData.eventId]) {
+    const raceIds = Object.keys(races);
+    if (raceIds.length >= MAX_SYNCED_RACES) {
+      const oldest = raceIds.reduce((oldestId, id) => {
+        if (!oldestId) return id;
+        return new Date(races[id].syncedAt) < new Date(races[oldestId].syncedAt) ? id : oldestId;
+      }, null);
+      if (oldest) {
+        delete races[oldest];
+      }
+    }
+  }
+
   races[raceData.eventId] = raceData;
   await chrome.storage.local.set({ syncedRaces: races });
 }

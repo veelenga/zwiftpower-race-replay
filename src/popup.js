@@ -8,9 +8,8 @@ const STORAGE_KEY_SYNC_STATUS = 'syncStatus';
 
 // DOM Elements
 const elements = {
-  pageStatus: document.getElementById('pageStatus'),
-  refreshBtn: document.getElementById('refreshBtn'),
   syncControls: document.getElementById('syncControls'),
+  raceCard: document.querySelector('.race-card'),
   raceName: document.getElementById('raceName'),
   raceMeta: document.getElementById('raceMeta'),
   categoryBadge: document.getElementById('categoryBadge'),
@@ -49,14 +48,6 @@ const storage = {
     await chrome.storage.local.remove(STORAGE_KEY_SYNC_STATUS);
   },
 };
-
-/**
- * Update page status display
- */
-function setPageStatus(type, message) {
-  elements.pageStatus.className = `status ${type}`;
-  elements.pageStatus.querySelector('.status-text').textContent = message;
-}
 
 /**
  * Format relative time
@@ -163,67 +154,79 @@ function updateSyncProgress(status) {
 }
 
 /**
+ * Show message when not on a race page
+ */
+function showNotOnRacePage(message) {
+  elements.raceCard.classList.add('hidden');
+  elements.syncBtn.disabled = true;
+  elements.syncBtn.querySelector('.btn-text').textContent = message;
+}
+
+/**
+ * Show race info when on a valid race page
+ */
+function showRaceInfo(response) {
+  elements.raceCard.classList.remove('hidden');
+  elements.syncBtn.disabled = false;
+  elements.raceName.textContent = response.eventName || `Event ${response.eventId}`;
+
+  const isAllCategory = response.categoryId === 'ALL' || !response.categoryId;
+  if (response.categoryName) {
+    elements.categoryBadge.textContent = response.categoryName;
+    elements.categoryBadge.className = `category-badge${isAllCategory ? ' all' : ''}`;
+  } else {
+    elements.categoryBadge.textContent = '';
+  }
+
+  if (isAllCategory) {
+    elements.raceTip.classList.remove('hidden');
+  } else {
+    elements.raceTip.classList.add('hidden');
+  }
+
+  const userStatus = response.userParticipates ? ' (you participate)' : '';
+  elements.raceMeta.textContent = `${response.riderCount} riders${userStatus}`;
+}
+
+/**
+ * Show ongoing sync status
+ */
+async function showOngoingSyncIfAny() {
+  const syncStatus = await storage.getSyncStatus();
+  if (syncStatus && (syncStatus.status === 'syncing' || syncStatus.status === 'extracting')) {
+    elements.raceCard.classList.remove('hidden');
+    elements.raceName.textContent = syncStatus.eventName || 'Syncing race...';
+    elements.raceMeta.textContent = 'Sync in progress';
+    elements.syncBtn.disabled = true;
+    updateSyncProgress(syncStatus);
+    return true;
+  }
+  return false;
+}
+
+/**
  * Check current page and update UI
  */
 async function checkCurrentPage() {
-  setPageStatus('loading', 'Checking page...');
-
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     currentTabId = tab?.id;
 
     if (!tab?.url?.includes('zwiftpower.com')) {
-      setPageStatus('error', 'Not on ZwiftPower');
-
-      // Still check for ongoing sync
-      const syncStatus = await storage.getSyncStatus();
-      if (syncStatus && (syncStatus.status === 'syncing' || syncStatus.status === 'extracting')) {
-        elements.syncControls.classList.remove('hidden');
-        elements.raceName.textContent = syncStatus.eventName || 'Syncing race...';
-        elements.raceMeta.textContent = 'Sync in progress (you can navigate away)';
-        elements.syncBtn.disabled = true;
-        updateSyncProgress(syncStatus);
-      }
+      showNotOnRacePage('Open a ZwiftPower race');
+      await showOngoingSyncIfAny();
       return;
     }
 
     const response = await chrome.tabs.sendMessage(tab.id, { action: 'getPageInfo' });
 
     if (!response?.isEventPage) {
-      setPageStatus('error', 'Not on a race page');
-
-      // Still check for ongoing sync
-      const syncStatus = await storage.getSyncStatus();
-      if (syncStatus && (syncStatus.status === 'syncing' || syncStatus.status === 'extracting')) {
-        elements.syncControls.classList.remove('hidden');
-        elements.raceName.textContent = syncStatus.eventName || 'Syncing race...';
-        elements.raceMeta.textContent = 'Sync in progress';
-        elements.syncBtn.disabled = true;
-        updateSyncProgress(syncStatus);
-      }
+      showNotOnRacePage('Navigate to a race page');
+      await showOngoingSyncIfAny();
       return;
     }
 
-    setPageStatus('success', 'Race page detected');
-    elements.syncControls.classList.remove('hidden');
-    elements.raceName.textContent = response.eventName || `Event ${response.eventId}`;
-
-    const isAllCategory = response.categoryId === 'ALL' || !response.categoryId;
-    if (response.categoryName) {
-      elements.categoryBadge.textContent = response.categoryName;
-      elements.categoryBadge.className = `category-badge${isAllCategory ? ' all' : ''}`;
-    } else {
-      elements.categoryBadge.textContent = '';
-    }
-
-    if (isAllCategory) {
-      elements.raceTip.classList.remove('hidden');
-    } else {
-      elements.raceTip.classList.add('hidden');
-    }
-
-    const userStatus = response.userParticipates ? ' (you participate)' : '';
-    elements.raceMeta.textContent = `${response.riderCount} riders${userStatus}`;
+    showRaceInfo(response);
 
     // Check if already synced
     const existingRaces = await storage.getRaces();
@@ -238,17 +241,8 @@ async function checkCurrentPage() {
     }
   } catch (error) {
     console.log('[Popup] Error checking page:', error.message);
-    setPageStatus('error', 'Could not read page');
-
-    // Still check for ongoing sync
-    const syncStatus = await storage.getSyncStatus();
-    if (syncStatus && (syncStatus.status === 'syncing' || syncStatus.status === 'extracting')) {
-      elements.syncControls.classList.remove('hidden');
-      elements.raceName.textContent = syncStatus.eventName || 'Syncing race...';
-      elements.raceMeta.textContent = 'Sync in progress';
-      elements.syncBtn.disabled = true;
-      updateSyncProgress(syncStatus);
-    }
+    showNotOnRacePage('Open a ZwiftPower race');
+    await showOngoingSyncIfAny();
   }
 }
 
@@ -346,10 +340,12 @@ async function loadRaceList() {
   elements.raceList.innerHTML = raceEntries
     .map(([eventId, race]) => {
       const syncIndicator = race.syncInProgress ? ' <span class="sync-indicator">syncing...</span>' : '';
+      const numericEventId = eventId.split('_')[0];
+      const zwiftPowerUrl = `https://zwiftpower.com/events.php?zid=${numericEventId}`;
       return `
       <div class="race-item" data-event-id="${eventId}">
         <div class="race-item-info">
-          <div class="race-item-name">${race.eventName || `Race ${eventId}`}</div>
+          <a href="${zwiftPowerUrl}" target="_blank" class="race-item-name" title="Open on ZwiftPower">${race.eventName || `Race ${eventId}`}</a>
           <div class="race-item-meta">${race.riders?.length || 0} riders | ${formatRelativeTime(race.syncedAt)}${syncIndicator}</div>
         </div>
         <div class="race-item-actions">
@@ -389,7 +385,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 document.addEventListener('DOMContentLoaded', async () => {
   elements.syncBtn.addEventListener('click', startSync);
   elements.cancelBtn.addEventListener('click', cancelSync);
-  elements.refreshBtn.addEventListener('click', checkCurrentPage);
   await checkCurrentPage();
   await loadRaceList();
 });

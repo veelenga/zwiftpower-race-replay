@@ -60,60 +60,7 @@ body {
   letter-spacing: 0.5px;
 }
 
-/* Status */
-.status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: #161b22;
-  border-radius: 8px;
-  font-size: 13px;
-  border: 1px solid #30363d;
-}
-
-.status-icon {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #8b949e;
-  flex-shrink: 0;
-}
-
-.status-text {
-  flex: 1;
-}
-
-.status.success .status-icon { background: #3fb950; }
-.status.error .status-icon { background: #f85149; }
-.status.loading .status-icon {
-  background: #58a6ff;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-.btn-icon {
-  background: transparent;
-  border: none;
-  color: #8b949e;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-}
-
-.btn-icon:hover {
-  background: #30363d;
-  color: #f0f6fc;
-}
-
-/* Controls */
-.controls {
-  margin-top: 12px;
-}
-
+/* Race Card */
 .race-card {
   background: #161b22;
   border: 1px solid #30363d;
@@ -355,6 +302,13 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-decoration: none;
+  display: block;
+}
+
+.race-item-name:hover {
+  color: #58a6ff;
+  text-decoration: underline;
 }
 
 .race-item-meta {
