@@ -33,6 +33,11 @@ const GROUP_COLORS = [
   '#ff7b72', '#79c0ff', '#d2a8ff', '#7ee787', '#ffa657',
 ];
 
+// Comparison colors (subset of GROUP_COLORS for up to 4 comparison riders)
+const COMPARE_COLORS = ['#ffd700', '#58a6ff', '#a371f7', '#3fb950'];
+const MAX_COMPARE_RIDERS = 4;
+const WATCHING_COLOR = '#f85149';
+
 // State
 let riders = [];
 let totalDistanceKm = 42;
@@ -46,8 +51,7 @@ let animationFrameId = null;
 let powerChart = null;
 let hrChart = null;
 let elevationData = [];
-let compareRiderPos = null;
-let compareGroupIdx = null;
+let compareRiders = []; // Array of positions of riders to compare with (max 4)
 let expandedGroups = new Set();
 let riderSearchTerm = '';
 let zoomStart = 0;
@@ -83,6 +87,7 @@ const elements = {
   powerLabel: document.getElementById('powerLabel'),
   standings: document.getElementById('standings'),
   riderSearch: document.getElementById('riderSearch'),
+  comparisonPanel: document.getElementById('comparisonPanel'),
   compareLabel: document.getElementById('compareLabel'),
   hrCompareLabel: document.getElementById('hrCompareLabel'),
   powerChart: document.getElementById('powerChart'),
@@ -105,6 +110,87 @@ function selectRider(pos) {
   expandedGroups.clear();
   elements.riderSelect.value = pos;
   update();
+}
+
+/**
+ * Toggle a rider for comparison
+ */
+function toggleCompareRider(pos) {
+  if (pos === watchingPosition) return; // Can't compare with yourself
+
+  const index = compareRiders.indexOf(pos);
+  if (index >= 0) {
+    compareRiders.splice(index, 1);
+  } else if (compareRiders.length < MAX_COMPARE_RIDERS) {
+    compareRiders.push(pos);
+  }
+  update();
+}
+
+/**
+ * Remove a rider from comparison
+ */
+function removeCompareRider(pos) {
+  const index = compareRiders.indexOf(pos);
+  if (index >= 0) {
+    compareRiders.splice(index, 1);
+    update();
+  }
+}
+
+/**
+ * Get the color for a comparison rider by position
+ */
+function getCompareRiderColor(pos) {
+  const index = compareRiders.indexOf(pos);
+  return index >= 0 ? COMPARE_COLORS[index] : null;
+}
+
+/**
+ * Get rider objects for all comparison riders
+ */
+function getCompareRiderObjects() {
+  return compareRiders
+    .map(pos => riders.find(r => r.position === pos))
+    .filter(Boolean);
+}
+
+/**
+ * Render the comparison panel showing selected riders
+ */
+function renderComparisonPanel() {
+  if (compareRiders.length === 0) {
+    elements.comparisonPanel.classList.add('hidden');
+    return;
+  }
+
+  elements.comparisonPanel.classList.remove('hidden');
+  const chips = compareRiders.map((pos, idx) => {
+    const rider = riders.find(r => r.position === pos);
+    if (!rider) return '';
+    const color = COMPARE_COLORS[idx];
+    const firstName = rider.name.split(' ')[0];
+    return `
+      <span class="compare-chip" style="--chip-color: ${color}" data-pos="${pos}">
+        <span class="chip-star">★</span>
+        <span class="chip-name">${firstName}</span>
+        <button class="chip-remove" data-pos="${pos}">×</button>
+      </span>
+    `;
+  }).join('');
+
+  elements.comparisonPanel.innerHTML = `
+    <span class="compare-label">Comparing:</span>
+    ${chips}
+  `;
+
+  // Add click handlers for remove buttons
+  elements.comparisonPanel.querySelectorAll('.chip-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeCompareRider(parseInt(btn.dataset.pos));
+    });
+  });
 }
 
 // Data loading
@@ -482,14 +568,15 @@ function update() {
   }
 
   renderStandings(groups, standings);
+  renderComparisonPanel();
   updateRiderMarkers(groups);
 
   // Throttle chart updates during playback for better performance
   const now = Date.now();
   if (!isPlaying || now - lastChartUpdate >= CHART_UPDATE_INTERVAL_MS) {
-    const compareTarget = getCompareTarget(groups, standings, leader);
-    updatePowerChart(t, you, compareTarget);
-    updateHRChart(t, you, compareTarget);
+    const compareTargets = getCompareRiderObjects();
+    updatePowerChart(t, you, compareTargets);
+    updateHRChart(t, you, compareTargets);
     lastChartUpdate = now;
   }
 }
@@ -507,15 +594,10 @@ function renderStandings(groups, standings) {
     // Skip group if searching and no riders match
     if (searchLower && filteredRiders.length === 0) return;
 
-    const isGroupSelected = compareGroupIdx === gIdx;
     const isYourGroup = group.hasYou;
     // Auto-expand when searching, otherwise use normal logic
     const isExpanded = searchLower || isYourGroup || expandedGroups.has(gIdx);
-    const headerClasses = [
-      'group-header',
-      isGroupSelected ? 'selected' : '',
-      isYourGroup ? 'your-group' : '',
-    ].filter(Boolean).join(' ');
+    const headerClasses = ['group-header', isYourGroup ? 'your-group' : ''].filter(Boolean).join(' ');
 
     const displayCount = searchLower ? `${filteredRiders.length}/${group.riders.length}` : group.riders.length;
     const expandIcon = isExpanded ? '▼' : '▶';
@@ -529,9 +611,10 @@ function renderStandings(groups, standings) {
       const ridersToShow = searchLower ? filteredRiders : group.riders;
       ridersToShow.forEach((r) => {
         const isYou = r.position === watchingPosition;
-        const isSelected = r.position === compareRiderPos;
+        const isComparing = compareRiders.includes(r.position);
+        const compareColor = getCompareRiderColor(r.position);
         const overallPos = standings.findIndex(s => s.position === r.position) + 1;
-        const classes = ['standings-row', isYou ? 'you' : '', isSelected ? 'selected' : ''].filter(Boolean).join(' ');
+        const classes = ['standings-row', isYou ? 'you' : '', isComparing ? 'comparing' : ''].filter(Boolean).join(' ');
 
         // Highlight matching text
         let displayName = r.name;
@@ -546,11 +629,16 @@ function renderStandings(groups, standings) {
           }
         }
 
+        // Star icon for comparison selection
+        const starStyle = compareColor ? `style="color: ${compareColor}"` : '';
+        const starIcon = isYou ? '' : `<span class="compare-star" ${starStyle}>${isComparing ? '★' : '☆'}</span>`;
+
         html += `
           <div class="${classes}" data-pos="${r.position}">
             <span class="pos">${overallPos}</span>
             <span class="name">${displayName}</span>
             <span class="power">${r.currentPower}W</span>
+            ${starIcon}
           </div>`;
       });
     }
@@ -576,8 +664,8 @@ function renderStandings(groups, standings) {
     header.onclick = (e) => {
       if (e.target.classList.contains('expand-icon')) return;
       const gIdx = parseInt(header.dataset.group);
-      compareGroupIdx = (compareGroupIdx === gIdx) ? null : gIdx;
-      compareRiderPos = null;
+      // Toggle group expansion on header click
+      expandedGroups.has(gIdx) ? expandedGroups.delete(gIdx) : expandedGroups.add(gIdx);
       update();
     };
   });
@@ -585,40 +673,9 @@ function renderStandings(groups, standings) {
   elements.standings.querySelectorAll('.standings-row:not(.you)').forEach(row => {
     row.onclick = () => {
       const pos = parseInt(row.dataset.pos);
-      compareRiderPos = (compareRiderPos === pos) ? null : pos;
-      compareGroupIdx = null;
-      update();
+      toggleCompareRider(pos);
     };
   });
-}
-
-function getCompareTarget(groups, standings, leader) {
-  if (compareGroupIdx !== null && groups[compareGroupIdx]) {
-    const group = groups[compareGroupIdx];
-    const avgPower = [];
-    const maxLen = Math.max(...group.riders.map(r => r.power.length));
-    for (let i = 0; i < maxLen; i++) {
-      const sum = group.riders.reduce((acc, r) => acc + (r.power[i] || 0), 0);
-      avgPower.push(Math.round(sum / group.riders.length));
-    }
-    // Include riders array for HR calculation
-    return { name: group.name, power: avgPower, riders: group.riders, isGroup: true };
-  }
-  if (compareRiderPos) {
-    const rider = standings.find(r => r.position === compareRiderPos);
-    // Ensure heartRate is available from original rider data
-    if (rider) {
-      const originalRider = riders.find(r => r.position === compareRiderPos);
-      rider.heartRate = originalRider?.heartRate || [];
-    }
-    return rider;
-  }
-  // For leader, ensure heartRate is available
-  if (leader) {
-    const originalLeader = riders.find(r => r.position === leader.position);
-    leader.heartRate = originalLeader?.heartRate || [];
-  }
-  return leader;
 }
 
 function updateRiderMarkers(groups) {
@@ -683,75 +740,97 @@ function updateRiderMarkers(groups) {
   });
 }
 
-function updatePowerChart(t, you, compareTarget) {
-  if (!powerChart || !you || !compareTarget) return;
+function updatePowerChart(t, you, compareTargets) {
+  if (!powerChart || !you) return;
 
   const start = Math.max(0, t - CHART_WINDOW_SIZE_SECONDS);
   const step = Math.max(sampleInterval, MIN_CHART_STEP_SECONDS);
 
   const labels = [];
   const youData = [];
-  const compareData = [];
+  const compareDatasets = compareTargets.map(() => []);
 
   for (let i = start; i <= t; i += step) {
     const idx = timeToIndex(i, sampleInterval);
     labels.push(formatTime(i));
     youData.push(you.power[idx] || 0);
-    compareData.push(compareTarget.power[idx] || 0);
+    compareTargets.forEach((target, j) => {
+      compareDatasets[j].push(target.power?.[idx] || 0);
+    });
   }
 
-  const compareName = compareTarget.isGroup
-    ? compareTarget.name
-    : compareTarget.name.split(' ')[0];
-  elements.compareLabel.textContent = `(vs ${compareName})`;
+  // Update label
+  if (compareTargets.length === 0) {
+    elements.compareLabel.textContent = '';
+  } else {
+    const names = compareTargets.map(r => r.name.split(' ')[0]).join(', ');
+    elements.compareLabel.textContent = `(vs ${names})`;
+  }
 
   const watchingName = getWatchingRiderName();
-  const compareColor = compareTarget.isGroup ? '#a371f7' : '#58a6ff';
-  powerChart.data.labels = labels;
-  powerChart.data.datasets = [
-    { label: watchingName, data: youData, borderColor: '#f85149', borderWidth: 2, fill: false },
-    { label: compareName, data: compareData, borderColor: compareColor, borderWidth: 2, fill: false },
+  const datasets = [
+    { label: watchingName, data: youData, borderColor: WATCHING_COLOR, borderWidth: 2, fill: false },
   ];
+
+  compareTargets.forEach((target, idx) => {
+    datasets.push({
+      label: target.name.split(' ')[0],
+      data: compareDatasets[idx],
+      borderColor: COMPARE_COLORS[idx],
+      borderWidth: 2,
+      fill: false,
+    });
+  });
+
+  powerChart.data.labels = labels;
+  powerChart.data.datasets = datasets;
   powerChart.update('none');
 }
 
-function updateHRChart(t, you, compareTarget) {
-  if (!hrChart || !you || !compareTarget) return;
+function updateHRChart(t, you, compareTargets) {
+  if (!hrChart || !you) return;
 
   const start = Math.max(0, t - CHART_WINDOW_SIZE_SECONDS);
   const step = Math.max(sampleInterval, MIN_CHART_STEP_SECONDS);
 
   const labels = [];
   const youData = [];
-  const compareData = [];
+  const compareDatasets = compareTargets.map(() => []);
 
   for (let i = start; i <= t; i += step) {
     const idx = timeToIndex(i, sampleInterval);
     labels.push(formatTime(i));
     youData.push(you.heartRate?.[idx] || 0);
-    // For groups, calculate average HR
-    if (compareTarget.isGroup && compareTarget.riders) {
-      const hrValues = compareTarget.riders
-        .map(r => r.heartRate?.[idx])
-        .filter(v => v && v > 0);
-      compareData.push(hrValues.length ? Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length) : 0);
-    } else {
-      compareData.push(compareTarget.heartRate?.[idx] || 0);
-    }
+    compareTargets.forEach((target, j) => {
+      compareDatasets[j].push(target.heartRate?.[idx] || 0);
+    });
   }
 
-  const compareName = compareTarget.isGroup
-    ? compareTarget.name
-    : compareTarget.name.split(' ')[0];
-  elements.hrCompareLabel.textContent = `(vs ${compareName})`;
+  // Update label
+  if (compareTargets.length === 0) {
+    elements.hrCompareLabel.textContent = '';
+  } else {
+    const names = compareTargets.map(r => r.name.split(' ')[0]).join(', ');
+    elements.hrCompareLabel.textContent = `(vs ${names})`;
+  }
 
   const watchingName = getWatchingRiderName();
-  const compareColor = compareTarget.isGroup ? '#a371f7' : '#58a6ff';
-  hrChart.data.labels = labels;
-  hrChart.data.datasets = [
-    { label: watchingName, data: youData, borderColor: '#f85149', borderWidth: 2, fill: false },
-    { label: compareName, data: compareData, borderColor: compareColor, borderWidth: 2, fill: false },
+  const datasets = [
+    { label: watchingName, data: youData, borderColor: WATCHING_COLOR, borderWidth: 2, fill: false },
   ];
+
+  compareTargets.forEach((target, idx) => {
+    datasets.push({
+      label: target.name.split(' ')[0],
+      data: compareDatasets[idx],
+      borderColor: COMPARE_COLORS[idx],
+      borderWidth: 2,
+      fill: false,
+    });
+  });
+
+  hrChart.data.labels = labels;
+  hrChart.data.datasets = datasets;
   hrChart.update('none');
 }
 
@@ -872,14 +951,16 @@ function initEventListeners() {
     }
   });
 
-  elements.elevationContainer.addEventListener('mouseup', (e) => {
+  // Handle mouseup on document to support dragging to edges
+  document.addEventListener('mouseup', (e) => {
     if (!isDragging) return;
     isDragging = false;
     elements.zoomSelection.style.display = 'none';
 
     const rect = elements.elevationContainer.getBoundingClientRect();
     const containerWidth = rect.width;
-    const currentX = e.clientX - rect.left;
+    // Clamp currentX to container bounds
+    const currentX = Math.max(0, Math.min(containerWidth, e.clientX - rect.left));
 
     const startPx = Math.min(dragStartX, currentX);
     const endPx = Math.max(dragStartX, currentX);
@@ -906,11 +987,21 @@ function initEventListeners() {
     update();
   });
 
+  // Update selection when dragging outside container
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const rect = elements.elevationContainer.getBoundingClientRect();
+    const containerWidth = rect.width;
+    // Clamp to container bounds
+    const currentX = Math.max(0, Math.min(containerWidth, e.clientX - rect.left));
+    const left = Math.min(dragStartX, currentX);
+    const width = Math.abs(currentX - dragStartX);
+    elements.zoomSelection.style.left = `${left}px`;
+    elements.zoomSelection.style.width = `${width}px`;
+  });
+
   elements.elevationContainer.addEventListener('mouseleave', () => {
-    if (isDragging) {
-      isDragging = false;
-      elements.zoomSelection.style.display = 'none';
-    }
+    // Don't cancel drag on mouseleave - let document handle it
     elements.cursorLine.style.display = 'none';
     elements.cursorInfo.style.display = 'none';
   });

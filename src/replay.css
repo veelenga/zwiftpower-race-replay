@@ -383,7 +383,7 @@ input[type="range"]::-webkit-slider-thumb {
 .standings-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .standings-row .power { width: 60px; text-align: right; color: #58a6ff; }
 .standings-row .gap { width: 55px; text-align: right; color: #8b949e; }
-.standings-row.selected { background: #388bfd33; border-left: 3px solid #58a6ff; }
+.standings-row.comparing { background: #21262d; }
 .standings-row:not(.you) { cursor: pointer; }
 
 /* Rider search */
@@ -409,6 +409,80 @@ input[type="range"]::-webkit-slider-thumb {
 
 .compare-hint { font-size: 11px; color: #8b949e; margin-bottom: 6px; }
 
+/* Comparison panel */
+.comparison-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 8px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+}
+
+.compare-label {
+  font-size: 11px;
+  color: #8b949e;
+  margin-right: 4px;
+}
+
+.compare-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: color-mix(in srgb, var(--chip-color) 20%, transparent);
+  border: 1px solid var(--chip-color);
+  border-radius: 12px;
+  font-size: 12px;
+  color: #f0f6fc;
+}
+
+.chip-star {
+  color: var(--chip-color);
+  font-size: 10px;
+}
+
+.chip-name {
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-remove {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.chip-remove:hover {
+  color: #f85149;
+}
+
+/* Star icon for comparison selection */
+.compare-star {
+  font-size: 12px;
+  color: #484f58;
+  margin-left: auto;
+  padding-left: 6px;
+  transition: color 0.15s ease;
+}
+
+.standings-row:hover .compare-star {
+  color: #8b949e;
+}
+
+.standings-row.comparing .compare-star {
+  color: inherit;
+}
+
 .group-header {
   background: #21262d;
   padding: 5px 8px;
@@ -422,7 +496,6 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .group-header:hover { background: #30363d; }
-.group-header.selected { background: #388bfd33; border: 1px solid #58a6ff; }
 .group-header.your-group { background: #f8514922; border: 1px solid #f85149; }
 .group-header:first-child { margin-top: 0; }
 .group-header .group-name { font-weight: 600; color: #c9d1d9; }
