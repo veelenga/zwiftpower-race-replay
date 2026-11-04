@@ -32,6 +32,7 @@ const {
   classifyAnalysisResponse,
   debounce,
   throttle,
+  sampleChartWindow,
   DEFAULT_SPEED_KMH,
 } = require('../src/utils');
 
@@ -996,5 +997,60 @@ describe('throttle', () => {
     throttled(1);
     throttled.flush();
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('sampleChartWindow', () => {
+  const rider = {
+    power: [100, 110, 120, 130, 140, 150],
+    heartRate: [90, 0, 120, 130, 140, 150],
+  };
+
+  test('samples power, heart rate and time labels from the window start to the current time', () => {
+    const { labels, series } = sampleChartWindow([rider], 4, { windowSeconds: 10, stepSeconds: 2 });
+
+    expect(labels).toEqual(['0:00', '0:02', '0:04']);
+    expect(series).toEqual([{ power: [100, 120, 140], heartRate: [90, 120, 140] }]);
+  });
+
+  test('starts the window at time minus window size', () => {
+    const { labels, series } = sampleChartWindow([rider], 5, { windowSeconds: 2, stepSeconds: 1 });
+
+    expect(labels).toEqual(['0:03', '0:04', '0:05']);
+    expect(series[0].power).toEqual([130, 140, 150]);
+  });
+
+  test('maps time to data index using the sample interval', () => {
+    const { labels, series } = sampleChartWindow([rider], 10, { windowSeconds: 10, stepSeconds: 5, sampleInterval: 5 });
+
+    expect(labels).toEqual(['0:00', '0:05', '0:10']);
+    expect(series[0].power).toEqual([100, 110, 120]);
+  });
+
+  test('uses zero for missing power and null for missing heart rate', () => {
+    const { series } = sampleChartWindow([rider, {}], 1, { windowSeconds: 10, stepSeconds: 1 });
+
+    expect(series[0].heartRate).toEqual([90, null]);
+    expect(series[1]).toEqual({ power: [0, 0], heartRate: [null, null] });
+  });
+
+  test('returns one series per rider', () => {
+    const { series } = sampleChartWindow([rider, rider, rider], 0, { windowSeconds: 10, stepSeconds: 1 });
+
+    expect(series).toHaveLength(3);
+  });
+
+  test('returns empty data without riders', () => {
+    const { labels, series } = sampleChartWindow([], 2, { windowSeconds: 10, stepSeconds: 1 });
+
+    expect(labels).toEqual(['0:00', '0:01', '0:02']);
+    expect(series).toEqual([]);
+  });
+
+  test('returns empty data for a non positive step', () => {
+    expect(sampleChartWindow([rider], 5, { windowSeconds: 10, stepSeconds: 0 })).toEqual({
+      labels: [],
+      series: [{ power: [], heartRate: [] }],
+    });
   });
 });

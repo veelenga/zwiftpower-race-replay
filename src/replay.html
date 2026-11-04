@@ -67,22 +67,15 @@
         <div class="comparison-panel hidden" id="comparisonPanel"></div>
         <div class="standings-table" id="standings">Loading...</div>
       </section>
-      <div class="charts-column">
-        <div class="panel chart-panel">
-          <h3>Power comparison <span id="compareLabel">(vs leader)</span></h3>
-          <div class="chart-container">
-            <canvas id="powerChart"></canvas>
-          </div>
+      <section class="panel chart-panel" aria-label="Power and heart rate">
+        <div class="chart-container">
+          <canvas id="chart" role="img" aria-label="Power and heart rate chart"></canvas>
         </div>
-        <div class="panel chart-panel">
-          <h3>Heart rate comparison <span id="hrCompareLabel">(vs leader)</span></h3>
-          <div class="chart-container">
-            <canvas id="hrChart"></canvas>
-          </div>
-        </div>
-      </div>
+      </section>
     </div>
   </main>
+
+  <div class="chart-tooltip hidden" id="chartTooltip"></div>
 
   <div id="loadingOverlay" class="loading-overlay">
     <div class="loading-content">

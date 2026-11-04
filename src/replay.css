@@ -378,21 +378,12 @@ body {
   min-width: 0;
 }
 
-.panel h3 {
-  font-size: 12px;
-  color: #8b949e;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  margin-bottom: 8px;
-}
-
 .standings-panel {
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.standings-panel h3 { flex-shrink: 0; }
 .standings-panel .compare-hint { flex-shrink: 0; }
 
 .standings-table {
@@ -533,27 +524,34 @@ body {
 .group-header .expand-icon:hover { opacity: 1; }
 .group-header .group-info { color: #8b949e; font-size: 11px; }
 
-.charts-column {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-}
-
 .chart-panel {
-  flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-
-.chart-panel h3 { flex-shrink: 0; }
 
 .chart-container {
   flex: 1;
-  min-height: 120px;
+  min-height: 200px;
   position: relative;
 }
+
+.chart-tooltip {
+  position: fixed;
+  z-index: 1000;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #f0f6fc;
+  white-space: nowrap;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tooltip-time { color: #8b949e; margin-bottom: 4px; }
+.chart-tooltip-name { font-weight: 600; }
 
 .loading-overlay {
   position: fixed;
@@ -636,8 +634,7 @@ body {
   }
 
   .standings-table { max-height: 200px; }
-  .charts-column { flex-direction: row; }
-  .chart-container { min-height: 140px; }
+  .chart-container { min-height: 240px; }
 }
 
 @media (max-width: 800px) {
@@ -657,8 +654,6 @@ body {
   .btn { padding: 5px 12px; font-size: 13px; }
 
   .details-row { flex-direction: column; }
-  .charts-column { flex-direction: column; }
 
   .panel { padding: 8px 10px; }
-  .panel h3 { font-size: 11px; margin-bottom: 6px; }
 }

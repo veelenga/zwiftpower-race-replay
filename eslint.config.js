@@ -33,6 +33,7 @@ const sharedUtils = [
   'classifyAnalysisResponse',
   'debounce',
   'throttle',
+  'sampleChartWindow',
 ];
 
 module.exports = [

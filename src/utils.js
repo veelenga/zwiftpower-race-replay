@@ -519,6 +519,23 @@ function throttle(fn, intervalMs) {
   return throttled;
 }
 
+function sampleChartWindow(riders, time, { windowSeconds, stepSeconds, sampleInterval = 1 }) {
+  const labels = [];
+  const series = riders.map(() => ({ power: [], heartRate: [] }));
+  if (!(stepSeconds > 0)) return { labels, series };
+
+  for (let t = Math.max(0, time - windowSeconds); t <= time; t += stepSeconds) {
+    const idx = timeToIndex(t, sampleInterval);
+    labels.push(formatTime(t));
+    riders.forEach((rider, i) => {
+      series[i].power.push(rider.power?.[idx] || 0);
+      series[i].heartRate.push(rider.heartRate?.[idx] || null);
+    });
+  }
+
+  return { labels, series };
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -553,6 +570,7 @@ if (typeof module !== 'undefined' && module.exports) {
     classifyAnalysisResponse,
     debounce,
     throttle,
+    sampleChartWindow,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,

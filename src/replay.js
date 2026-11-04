@@ -14,10 +14,17 @@ const ELEVATION_PATH_MAX_POINTS = 300;
 const CURSOR_INFO_WIDTH_PX = 120;
 const CURSOR_INFO_OFFSET_PX = 10;
 
-const POWER_CHART_MIN = 0;
-const POWER_CHART_SUGGESTED_MAX = 500;
-const HR_CHART_MIN = 60;
-const HR_CHART_SUGGESTED_MAX = 200;
+const POWER_AXIS_MIN = 0;
+const POWER_AXIS_SUGGESTED_MAX = 500;
+const HR_AXIS_MIN = 60;
+const HR_AXIS_SUGGESTED_MAX = 200;
+const POWER_LINE_WIDTH = 2;
+const HR_LINE_WIDTH = 1.25;
+const HR_LINE_DASH = [5, 4];
+const CHART_TEXT_COLOR = '#8b949e';
+const CHART_GRID_COLOR = '#21262d';
+const CHART_CURSOR_COLOR = 'rgba(255, 255, 255, 0.5)';
+const CHART_TOOLTIP_OFFSET_PX = 12;
 
 const MIN_CHART_STEP_SECONDS = 10;
 
@@ -29,6 +36,7 @@ const GROUP_COLORS = [
 const COMPARE_COLORS = ['#ffd700', '#58a6ff', '#a371f7', '#3fb950'];
 const MAX_COMPARE_RIDERS = 4;
 const WATCHING_COLOR = '#f85149';
+const LEADER_COLOR = '#ffd700';
 
 let riders = [];
 let totalDistanceKm = 42;
@@ -39,8 +47,8 @@ let isPlaying = false;
 let playbackSpeed = 10;
 let lastFrameTime = null;
 let animationFrameId = null;
-let powerChart = null;
-let hrChart = null;
+let chart = null;
+let chartSeries = [];
 let elevationData = [];
 let distanceData = [];
 let compareRiders = [];
@@ -81,18 +89,20 @@ const elements = {
   standings: document.getElementById('standings'),
   riderSearch: document.getElementById('riderSearch'),
   comparisonPanel: document.getElementById('comparisonPanel'),
-  compareLabel: document.getElementById('compareLabel'),
-  hrCompareLabel: document.getElementById('hrCompareLabel'),
-  powerChart: document.getElementById('powerChart'),
-  hrChart: document.getElementById('hrChart'),
+  chart: document.getElementById('chart'),
+  chartTooltip: document.getElementById('chartTooltip'),
   loadingOverlay: document.getElementById('loadingOverlay'),
   errorOverlay: document.getElementById('errorOverlay'),
   errorText: document.getElementById('errorText'),
 };
 
+function shortName(rider) {
+  return rider.name.split(' ')[0];
+}
+
 function getWatchingRiderName() {
   const rider = riders.find(r => r.position === watchingPosition);
-  return rider ? rider.name.split(' ')[0] : 'Rider';
+  return rider ? shortName(rider) : 'Rider';
 }
 
 function selectRider(pos) {
@@ -231,8 +241,7 @@ async function loadRaceData() {
 
     populateRiderSelector();
     initElevation();
-    initPowerChart();
-    initHRChart();
+    initChart();
     update();
 
     elements.loadingOverlay.classList.add('hidden');
@@ -373,167 +382,149 @@ function updateDistanceMarkers() {
 
 const verticalLinePlugin = {
   id: 'verticalLine',
-  afterDraw: (chart) => {
-    const verticalLineOpts = chart.options.plugins.verticalLine;
-    if (!verticalLineOpts?.show || verticalLineOpts.cursorX === null) return;
+  afterDraw: (target) => {
+    const x = target.options.plugins.verticalLine?.cursorX;
+    const area = target.chartArea;
+    if (x === null || x === undefined || !area || x < area.left || x > area.right) return;
 
-    const ctx = chart.ctx;
-    const xAxis = chart.scales.x;
-    const yAxis = chart.scales.y;
-
-    if (!xAxis || !yAxis) return;
-
-    const x = verticalLineOpts.cursorX;
-    if (x < xAxis.left || x > xAxis.right) return;
-
+    const ctx = target.ctx;
     ctx.save();
     ctx.beginPath();
-    ctx.moveTo(x, yAxis.top);
-    ctx.lineTo(x, yAxis.bottom);
+    ctx.moveTo(x, area.top);
+    ctx.lineTo(x, area.bottom);
     ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.strokeStyle = CHART_CURSOR_COLOR;
     ctx.stroke();
     ctx.restore();
-  }
+  },
 };
 
-function getChartValuesAtX(chart, x) {
-  const xAxis = chart.scales.x;
-  if (!xAxis || chart.data.labels.length === 0) return null;
-
-  const dataIndex = Math.round(xAxis.getValueForPixel(x));
-  if (dataIndex < 0 || dataIndex >= chart.data.labels.length) return null;
-
-  const label = chart.data.labels[dataIndex];
-  const values = chart.data.datasets.map(ds => ({
-    label: ds.label,
-    value: ds.data[dataIndex],
-    color: ds.borderColor
-  }));
-
-  return { label, values, dataIndex };
+function valueAxis(position, title, range) {
+  return {
+    type: 'linear',
+    axis: 'y',
+    position,
+    title: { display: true, text: title, color: CHART_TEXT_COLOR },
+    ticks: { color: CHART_TEXT_COLOR },
+    grid: { color: CHART_GRID_COLOR, drawOnChartArea: position === 'left' },
+    ...range,
+  };
 }
 
-let chartTooltip = null;
+function initChart() {
+  chart = new Chart(elements.chart.getContext('2d'), {
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      scales: {
+        x: { ticks: { color: CHART_TEXT_COLOR, maxTicksLimit: 8 }, grid: { color: CHART_GRID_COLOR } },
+        power: valueAxis('left', 'Power (W)', { min: POWER_AXIS_MIN, suggestedMax: POWER_AXIS_SUGGESTED_MAX }),
+        heartRate: valueAxis('right', 'Heart rate (bpm)', { min: HR_AXIS_MIN, suggestedMax: HR_AXIS_SUGGESTED_MAX }),
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false },
+        verticalLine: { cursorX: null },
+      },
+      elements: { point: { radius: 0 }, line: { tension: 0.2 } },
+    },
+    plugins: [verticalLinePlugin],
+  });
+  elements.chart.addEventListener('mousemove', handleChartMouseMove);
+  elements.chart.addEventListener('mouseleave', handleChartMouseLeave);
+}
 
-function getChartTooltip() {
-  if (!chartTooltip) {
-    chartTooltip = document.createElement('div');
-    chartTooltip.className = 'chart-tooltip';
-    chartTooltip.style.cssText = `
-      position: fixed;
-      background: rgba(0, 0, 0, 0.9);
-      border: 1px solid #30363d;
-      border-radius: 4px;
-      padding: 6px 10px;
-      font-size: 12px;
-      color: #f0f6fc;
-      pointer-events: none;
-      z-index: 1000;
-      display: none;
-      white-space: nowrap;
-    `;
-    document.body.appendChild(chartTooltip);
+function chartRiders(you, leader) {
+  const compared = getCompareRiderObjects().map((rider, idx) => ({ rider, color: COMPARE_COLORS[idx], role: 'compare' }));
+  const leaderFallback = leader && leader.position !== you.position
+    ? [{ rider: leader, color: LEADER_COLOR, role: 'leader' }]
+    : [];
+  return [{ rider: you, color: WATCHING_COLOR, role: 'watching' }, ...(compared.length ? compared : leaderFallback)];
+}
+
+function chartDatasets({ rider, color, power, heartRate }) {
+  const name = shortName(rider);
+  return [
+    { label: `${name} power`, data: power, yAxisID: 'power', borderColor: color, borderWidth: POWER_LINE_WIDTH, fill: false },
+    { label: `${name} heart rate`, data: heartRate, yAxisID: 'heartRate', borderColor: color, borderWidth: HR_LINE_WIDTH, borderDash: HR_LINE_DASH, fill: false },
+  ];
+}
+
+function updateChart(t, you, leader) {
+  if (!chart || !you) return;
+
+  const entries = chartRiders(you, leader);
+  const { labels, series } = sampleChartWindow(entries.map(entry => entry.rider), t, {
+    windowSeconds: CHART_WINDOW_SIZE_SECONDS,
+    stepSeconds: Math.max(sampleInterval, MIN_CHART_STEP_SECONDS),
+    sampleInterval,
+  });
+
+  chartSeries = entries.map((entry, idx) => ({ ...entry, ...series[idx] }));
+  chart.data.labels = labels;
+  chart.data.datasets = chartSeries.flatMap(chartDatasets);
+  chart.update('none');
+}
+
+function chartIndexAt(x) {
+  const xAxis = chart?.scales.x;
+  const count = chart?.data.labels.length ?? 0;
+  if (!xAxis || count === 0) return -1;
+
+  const index = Math.round(xAxis.getValueForPixel(x));
+  return index >= 0 && index < count ? index : -1;
+}
+
+function formatChartValue(value, unit) {
+  return value === null || value === undefined ? '-' : `${Math.round(value)} ${unit}`;
+}
+
+function chartTooltipRow(entry, index) {
+  const row = createElement('div', 'chart-tooltip-row');
+  const name = createElement('span', 'chart-tooltip-name', shortName(entry.rider));
+  name.style.color = entry.color;
+  row.append(name, ` ${formatChartValue(entry.power[index], 'W')} · ${formatChartValue(entry.heartRate[index], 'bpm')}`);
+  return row;
+}
+
+function renderChartTooltip(index, e) {
+  const tooltip = elements.chartTooltip;
+  tooltip.replaceChildren(
+    createElement('div', 'chart-tooltip-time', chart.data.labels[index]),
+    ...chartSeries.map(entry => chartTooltipRow(entry, index)),
+  );
+  tooltip.classList.remove('hidden');
+
+  const fitsRight = e.clientX + CHART_TOOLTIP_OFFSET_PX + tooltip.offsetWidth <= window.innerWidth;
+  const left = fitsRight ? e.clientX + CHART_TOOLTIP_OFFSET_PX : e.clientX - CHART_TOOLTIP_OFFSET_PX - tooltip.offsetWidth;
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${e.clientY - CHART_TOOLTIP_OFFSET_PX}px`;
+}
+
+function setChartCursor(x) {
+  if (!chart) return;
+  chart.options.plugins.verticalLine.cursorX = x;
+  chart.draw();
+}
+
+function handleChartMouseMove(e) {
+  const x = e.clientX - elements.chart.getBoundingClientRect().left;
+  const index = chartIndexAt(x);
+  setChartCursor(x);
+
+  if (index < 0 || chartSeries.length === 0) {
+    elements.chartTooltip.classList.add('hidden');
+    return;
   }
-  return chartTooltip;
+  renderChartTooltip(index, e);
 }
 
-function setupChartCursorTracking(chart, canvas) {
-  canvas.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-
-    if (powerChart) {
-      powerChart.options.plugins.verticalLine.cursorX = x;
-      powerChart.draw();
-    }
-    if (hrChart) {
-      hrChart.options.plugins.verticalLine.cursorX = x;
-      hrChart.draw();
-    }
-
-    const tooltip = getChartTooltip();
-    const data = getChartValuesAtX(chart, x);
-
-    if (data && data.values.length > 0) {
-      const unit = chart === powerChart ? 'W' : 'bpm';
-      let html = `<div style="color: #8b949e; margin-bottom: 4px;">${data.label}</div>`;
-      data.values.forEach(v => {
-        const val = v.value !== undefined && v.value !== null ? Math.round(v.value) : '-';
-        html += `<div><span style="color: ${v.color};">${escapeHtml(v.label)}:</span> ${val}${unit}</div>`;
-      });
-      tooltip.innerHTML = html;
-      tooltip.style.display = 'block';
-      tooltip.style.left = `${e.clientX + 12}px`;
-      tooltip.style.top = `${e.clientY - 10}px`;
-    } else {
-      tooltip.style.display = 'none';
-    }
-  });
-
-  canvas.addEventListener('mouseleave', () => {
-    if (powerChart) {
-      powerChart.options.plugins.verticalLine.cursorX = null;
-      powerChart.draw();
-    }
-    if (hrChart) {
-      hrChart.options.plugins.verticalLine.cursorX = null;
-      hrChart.draw();
-    }
-
-    const tooltip = getChartTooltip();
-    tooltip.style.display = 'none';
-  });
-}
-
-function initPowerChart() {
-  const ctx = elements.powerChart.getContext('2d');
-  powerChart = new Chart(ctx, {
-    type: 'line',
-    data: { labels: [], datasets: [] },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { enabled: false },
-      scales: {
-        x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: '#21262d' } },
-        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, min: POWER_CHART_MIN, suggestedMax: POWER_CHART_SUGGESTED_MAX },
-      },
-      plugins: {
-        legend: { display: true, labels: { color: '#c9d1d9', boxWidth: 12 } },
-        verticalLine: { show: true, cursorX: null }
-      },
-      elements: { point: { radius: 0 }, line: { tension: 0.2 } },
-    },
-    plugins: [verticalLinePlugin],
-  });
-  setupChartCursorTracking(powerChart, elements.powerChart);
-}
-
-function initHRChart() {
-  const ctx = elements.hrChart.getContext('2d');
-  hrChart = new Chart(ctx, {
-    type: 'line',
-    data: { labels: [], datasets: [] },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { enabled: false },
-      scales: {
-        x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: '#21262d' } },
-        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, min: HR_CHART_MIN, suggestedMax: HR_CHART_SUGGESTED_MAX },
-      },
-      plugins: {
-        legend: { display: true, labels: { color: '#c9d1d9', boxWidth: 12 } },
-        verticalLine: { show: true, cursorX: null }
-      },
-      elements: { point: { radius: 0 }, line: { tension: 0.2 } },
-    },
-    plugins: [verticalLinePlugin],
-  });
-  setupChartCursorTracking(hrChart, elements.hrChart);
+function handleChartMouseLeave() {
+  setChartCursor(null);
+  elements.chartTooltip.classList.add('hidden');
 }
 
 function update() {
@@ -547,7 +538,7 @@ function update() {
   renderStats({ t, standings, groups, you, leader });
   renderStandingsThrottled(groups, standings);
   updateRiderMarkers(groups);
-  updateChartsThrottled(t, you);
+  updateChartThrottled(t, you, leader);
 }
 
 function updateNow() {
@@ -604,13 +595,11 @@ function renderStats({ t, standings, groups, you, leader }) {
   elements.statPower.title = `${watchingName}'s power`;
 }
 
-function updateChartsThrottled(t, you) {
+function updateChartThrottled(t, you, leader) {
   const now = Date.now();
   if (isPlaying && now - lastChartUpdate < CHART_UPDATE_INTERVAL_MS) return;
 
-  const compareTargets = getCompareRiderObjects();
-  updatePowerChart(t, you, compareTargets);
-  updateHRChart(t, you, compareTargets);
+  updateChart(t, you, leader);
   lastChartUpdate = now;
 }
 
@@ -723,98 +712,6 @@ function updateRiderMarkers(groups) {
 
   container.querySelectorAll('.rider-marker, .rider-power-label').forEach(el => el.remove());
   container.append(...markers);
-}
-
-function updatePowerChart(t, you, compareTargets) {
-  if (!powerChart || !you) return;
-
-  const start = Math.max(0, t - CHART_WINDOW_SIZE_SECONDS);
-  const step = Math.max(sampleInterval, MIN_CHART_STEP_SECONDS);
-
-  const labels = [];
-  const youData = [];
-  const compareDatasets = compareTargets.map(() => []);
-
-  for (let i = start; i <= t; i += step) {
-    const idx = timeToIndex(i, sampleInterval);
-    labels.push(formatTime(i));
-    youData.push(you.power[idx] || 0);
-    compareTargets.forEach((target, j) => {
-      compareDatasets[j].push(target.power?.[idx] || 0);
-    });
-  }
-
-  if (compareTargets.length === 0) {
-    elements.compareLabel.textContent = '';
-  } else {
-    const names = compareTargets.map(r => r.name.split(' ')[0]).join(', ');
-    elements.compareLabel.textContent = `(vs ${names})`;
-  }
-
-  const watchingName = getWatchingRiderName();
-  const datasets = [
-    { label: watchingName, data: youData, borderColor: WATCHING_COLOR, borderWidth: 2, fill: false },
-  ];
-
-  compareTargets.forEach((target, idx) => {
-    datasets.push({
-      label: target.name.split(' ')[0],
-      data: compareDatasets[idx],
-      borderColor: COMPARE_COLORS[idx],
-      borderWidth: 2,
-      fill: false,
-    });
-  });
-
-  powerChart.data.labels = labels;
-  powerChart.data.datasets = datasets;
-  powerChart.update('none');
-}
-
-function updateHRChart(t, you, compareTargets) {
-  if (!hrChart || !you) return;
-
-  const start = Math.max(0, t - CHART_WINDOW_SIZE_SECONDS);
-  const step = Math.max(sampleInterval, MIN_CHART_STEP_SECONDS);
-
-  const labels = [];
-  const youData = [];
-  const compareDatasets = compareTargets.map(() => []);
-
-  for (let i = start; i <= t; i += step) {
-    const idx = timeToIndex(i, sampleInterval);
-    labels.push(formatTime(i));
-    youData.push(you.heartRate?.[idx] || 0);
-    compareTargets.forEach((target, j) => {
-      compareDatasets[j].push(target.heartRate?.[idx] || 0);
-    });
-  }
-
-  if (compareTargets.length === 0) {
-    elements.hrCompareLabel.textContent = '';
-  } else {
-    const names = compareTargets.map(r => r.name.split(' ')[0]).join(', ');
-    elements.hrCompareLabel.textContent = `(vs ${names})`;
-  }
-
-  const watchingName = getWatchingRiderName();
-  const datasets = [
-    { label: watchingName, data: youData, borderColor: WATCHING_COLOR, borderWidth: 2, fill: false },
-  ];
-
-  compareTargets.forEach((target, idx) => {
-    datasets.push({
-      label: target.name.split(' ')[0],
-      data: compareDatasets[idx],
-      borderColor: COMPARE_COLORS[idx],
-      borderWidth: 2,
-      fill: false,
-    });
-  });
-
-  hrChart.data.labels = labels;
-  hrChart.data.datasets = datasets;
-  hrChart.update('none');
 }
 
 function gameLoop(timestamp) {
