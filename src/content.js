@@ -566,14 +566,14 @@ const replayControl = {
 const replayViewers = [];
 
 const CONTROL_BUTTON_ACTIONS = {
-  idle: () => startSyncFromControl({ openWhenDone: true }),
-  error: () => startSyncFromControl({ openWhenDone: true }),
-  synced: () => requestOpenReplay(replayControl.raceKey),
+  idle: () => startSyncFromControl({ watchWhenDone: true }),
+  error: () => startSyncFromControl({ watchWhenDone: true }),
+  synced: () => watchReplay(replayControl.raceKey),
 };
 
 const CONTROL_LINK_ACTIONS = {
   cancel: () => cancelSyncFromControl(),
-  resync: () => startSyncFromControl({ openWhenDone: false }),
+  resync: () => startSyncFromControl({ watchWhenDone: false }),
 };
 
 function requestOpenReplay(raceKey) {
@@ -581,11 +581,16 @@ function requestOpenReplay(raceKey) {
     .catch(error => console.log(`[ZP Replay] Could not open replay: ${error.message}`));
 }
 
-async function startSyncFromControl({ openWhenDone }) {
+function watchReplay(raceKey) {
+  const watchedInline = raceKey === replayControl.raceKey && replayViewers.some(viewer => viewer.watch(raceKey));
+  if (!watchedInline) requestOpenReplay(raceKey);
+}
+
+async function startSyncFromControl({ watchWhenDone }) {
   replayControl.elements.button.disabled = true;
   const result = await runSync();
-  if (openWhenDone && result.success && !result.cancelled) {
-    requestOpenReplay(result.data.eventId);
+  if (watchWhenDone && result.success && !result.cancelled) {
+    watchReplay(result.data.eventId);
   }
 }
 

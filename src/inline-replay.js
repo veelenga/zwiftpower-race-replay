@@ -561,7 +561,31 @@ function handleInlineRacesChanged(races) {
   if (inlineReplay.raceKey) applyInlineRace(races?.[inlineReplay.raceKey]);
 }
 
+function revealInlineReplay(view) {
+  view.graph.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  view.bar.play.focus({ preventScroll: true });
+}
+
+async function startInlineReplay(raceKey) {
+  if (!(await loadInlineRace(raceKey))) return;
+
+  const { view } = inlineReplay;
+  if (!view) {
+    requestOpenReplay(raceKey);
+    return;
+  }
+  revealInlineReplay(view);
+  playInline();
+}
+
+function watchInlineReplay(raceKey) {
+  if (!findProfileTarget()) return false;
+  startInlineReplay(raceKey);
+  return true;
+}
+
 registerReplayViewer({
   refresh: refreshInlineReplay,
   racesChanged: handleInlineRacesChanged,
+  watch: watchInlineReplay,
 });
