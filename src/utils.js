@@ -485,6 +485,42 @@ function classifyAnalysisResponse({ status, contentType = '', bodyText = '', url
   return Array.isArray(data?.xData) && data.xData.length > 0 ? 'ok' : 'empty';
 }
 
+function debounce(fn, delayMs) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delayMs);
+  };
+}
+
+function throttle(fn, intervalMs) {
+  let lastRunAt = -Infinity;
+  let timer = null;
+  let pendingArgs = null;
+
+  const run = () => {
+    clearTimeout(timer);
+    timer = null;
+    lastRunAt = Date.now();
+    const args = pendingArgs;
+    pendingArgs = null;
+    fn(...args);
+  };
+
+  const throttled = (...args) => {
+    pendingArgs = args;
+    const waitMs = intervalMs - (Date.now() - lastRunAt);
+    if (waitMs <= 0) run();
+    else if (!timer) timer = setTimeout(run, waitMs);
+  };
+
+  throttled.flush = () => {
+    if (pendingArgs) run();
+  };
+
+  return throttled;
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -517,6 +553,8 @@ if (typeof module !== 'undefined' && module.exports) {
     isSyncStatusForEvent,
     isSyncStatusStale,
     classifyAnalysisResponse,
+    debounce,
+    throttle,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,

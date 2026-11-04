@@ -31,6 +31,8 @@ const sharedUtils = [
   'isSyncStatusForEvent',
   'isSyncStatusStale',
   'classifyAnalysisResponse',
+  'debounce',
+  'throttle',
 ];
 
 module.exports = [

@@ -30,6 +30,8 @@ const {
   isSyncStatusForEvent,
   isSyncStatusStale,
   classifyAnalysisResponse,
+  debounce,
+  throttle,
   DEFAULT_SPEED_KMH,
 } = require('../src/utils');
 
@@ -896,5 +898,101 @@ describe('classifyAnalysisResponse', () => {
   test('treats other non success statuses as invalid', () => {
     expect(classify({ status: 404 })).toBe('invalid');
     expect(classify({ status: 0 })).toBe('invalid');
+  });
+});
+
+describe('debounce', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  test('runs once with the latest arguments after the delay', () => {
+    const fn = jest.fn();
+    const debounced = debounce(fn, 300);
+
+    debounced('a');
+    jest.advanceTimersByTime(200);
+    debounced('b');
+    jest.advanceTimersByTime(299);
+    expect(fn).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(1);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledWith('b');
+  });
+
+  test('runs again for calls after the delay has passed', () => {
+    const fn = jest.fn();
+    const debounced = debounce(fn, 300);
+
+    debounced(1);
+    jest.advanceTimersByTime(300);
+    debounced(2);
+    jest.advanceTimersByTime(300);
+
+    expect(fn.mock.calls).toEqual([[1], [2]]);
+  });
+});
+
+describe('throttle', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  test('runs the first call immediately', () => {
+    const fn = jest.fn();
+    throttle(fn, 100)('first');
+    expect(fn).toHaveBeenCalledWith('first');
+  });
+
+  test('runs at most once per interval and ends with the latest arguments', () => {
+    const fn = jest.fn();
+    const throttled = throttle(fn, 100);
+
+    throttled(1);
+    throttled(2);
+    jest.advanceTimersByTime(50);
+    throttled(3);
+    expect(fn.mock.calls).toEqual([[1]]);
+
+    jest.advanceTimersByTime(50);
+    expect(fn.mock.calls).toEqual([[1], [3]]);
+
+    jest.advanceTimersByTime(500);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  test('runs immediately again once the interval has passed', () => {
+    const fn = jest.fn();
+    const throttled = throttle(fn, 100);
+
+    throttled(1);
+    jest.advanceTimersByTime(150);
+    throttled(2);
+
+    expect(fn.mock.calls).toEqual([[1], [2]]);
+  });
+
+  test('flush runs a pending call right away and drops its timer', () => {
+    const fn = jest.fn();
+    const throttled = throttle(fn, 100);
+
+    throttled(1);
+    throttled(2);
+    throttled.flush();
+    expect(fn.mock.calls).toEqual([[1], [2]]);
+
+    jest.advanceTimersByTime(500);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  test('flush does nothing without a pending call', () => {
+    const fn = jest.fn();
+    const throttled = throttle(fn, 100);
+
+    throttled.flush();
+    expect(fn).not.toHaveBeenCalled();
+
+    throttled(1);
+    throttled.flush();
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });
