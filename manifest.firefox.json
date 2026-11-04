@@ -6,7 +6,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "zwiftpower-race-replay@veelenga.github.io",
-      "strict_min_version": "109.0"
+      "strict_min_version": "128.0"
     }
   },
   "permissions": [
@@ -36,6 +36,12 @@
       "js": ["src/utils.js", "src/content.js", "src/inline-replay.js"],
       "css": ["src/content.css"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://zwiftpower.com/*"],
+      "js": ["src/profile-bridge.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
     }
   ],
   "background": {

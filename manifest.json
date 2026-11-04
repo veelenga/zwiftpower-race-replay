@@ -30,6 +30,12 @@
       "js": ["src/utils.js", "src/content.js", "src/inline-replay.js"],
       "css": ["src/content.css"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://zwiftpower.com/*"],
+      "js": ["src/profile-bridge.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
     }
   ],
   "background": {

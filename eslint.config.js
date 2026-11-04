@@ -80,9 +80,15 @@ module.exports = [
   },
   {
     files: ['src/**/*.js'],
-    ignores: ['src/utils.js'],
+    ignores: ['src/utils.js', 'src/profile-bridge.js'],
     languageOptions: {
       globals: Object.fromEntries(sharedUtils.map(name => [name, 'readonly'])),
+    },
+  },
+  {
+    files: ['src/profile-bridge.js'],
+    languageOptions: {
+      globals: { chrome: 'off', browser: 'off' },
     },
   },
   {
