@@ -1,6 +1,6 @@
 const INLINE_GRAPH_SELECTOR = '#segment_graph';
 const INLINE_PLOT_SELECTOR = 'rect.highcharts-plot-background';
-const INLINE_PATH_SELECTOR = '.highcharts-series-0 path.highcharts-graph';
+const INLINE_PATH_SELECTOR = 'path.highcharts-graph';
 const INLINE_SVG_NS = 'http://www.w3.org/2000/svg';
 const INLINE_HOST_CLASS = 'zp-replay-host';
 const INLINE_DOT_CLASS = 'zp-replay-dot';
