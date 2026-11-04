@@ -50,23 +50,6 @@ const storage = {
 };
 
 /**
- * Format relative time
- */
-function formatRelativeTime(isoString) {
-  const date = new Date(isoString);
-  const now = new Date();
-  const diffMs = now - date;
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffMins < 1) return 'just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${diffDays}d ago`;
-}
-
-/**
  * Update sync progress UI
  */
 function updateSyncProgress(status) {
@@ -89,16 +72,7 @@ function updateSyncProgress(status) {
       elements.progressText.textContent = 'Starting sync...';
       break;
 
-    case 'checking':
-      elements.syncBtn.disabled = true;
-      btnText.textContent = 'Checking...';
-      btnSpinner.classList.remove('hidden');
-      elements.syncProgress.classList.remove('hidden');
-      elements.progressFill.style.width = '5%';
-      elements.progressText.textContent = status.message || 'Checking data availability...';
-      break;
-
-    case 'syncing':
+    case 'syncing': {
       elements.syncBtn.disabled = true;
       btnText.textContent = 'Syncing...';
       btnSpinner.classList.remove('hidden');
@@ -114,6 +88,7 @@ function updateSyncProgress(status) {
         elements.raceName.textContent = status.eventName;
       }
       break;
+    }
 
     case 'complete':
       elements.syncBtn.disabled = false;
