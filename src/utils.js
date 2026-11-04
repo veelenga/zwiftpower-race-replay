@@ -187,7 +187,7 @@ function detectGroups(standings, time, watchingPosition, sampleInterval = 1) {
       avgPower,
       timeGapToLeader,
       hasYou,
-      name: idx === 0 ? 'Lead Group' : `Group ${idx + 1}`,
+      name: idx === 0 ? 'Lead group' : `Group ${idx + 1}`,
     };
   });
 }
@@ -451,6 +451,74 @@ function isSyncStatusStale(status, now, maxAgeMs) {
   return Number.isNaN(updatedAt) || now - updatedAt > maxAgeMs;
 }
 
+function buildRaceKey(eventId, categoryId) {
+  return categoryId ? `${eventId}_${categoryId}` : eventId;
+}
+
+function summarizeSyncedRaces(syncedRaces) {
+  return Object.fromEntries(
+    Object.entries(syncedRaces || {}).map(([raceKey, race]) => [raceKey, {
+      riderCount: race?.riders?.length || 0,
+      syncInProgress: Boolean(race?.syncInProgress),
+    }])
+  );
+}
+
+function calcSyncPercent(current, total) {
+  return total > 0 ? clamp(Math.round((current / total) * 100), 0, 100) : 0;
+}
+
+function describeSyncedRace(raceSummary) {
+  const synced = `${raceSummary.riderCount} riders synced`;
+  return raceSummary.syncInProgress ? `${synced}, sync incomplete` : synced;
+}
+
+const REPLAY_CONTROL_SYNC_STATES = {
+  starting: () => ({
+    kind: 'syncing',
+    buttonLabel: 'Syncing',
+    progress: 0,
+    link: 'cancel',
+    statusText: 'Preparing riders',
+    isError: false,
+  }),
+  syncing: status => ({
+    kind: 'syncing',
+    buttonLabel: `Syncing ${status.current}/${status.total}`,
+    progress: calcSyncPercent(status.current, status.total),
+    link: 'cancel',
+    statusText: status.riderName ? `#${status.riderPosition} ${status.riderName}` : '',
+    isError: false,
+  }),
+  error: status => ({
+    kind: 'error',
+    buttonLabel: 'Retry',
+    progress: null,
+    link: null,
+    statusText: status.error || 'Sync failed',
+    isError: true,
+  }),
+};
+
+function buildReplayControlState({ syncStatus, raceSummary, raceKey, now, maxAgeMs }) {
+  const isCurrentStatus = syncStatus?.raceKey === raceKey && !isSyncStatusStale(syncStatus, now, maxAgeMs);
+  const buildSyncState = isCurrentStatus ? REPLAY_CONTROL_SYNC_STATES[syncStatus.status] : null;
+  if (buildSyncState) return buildSyncState(syncStatus);
+
+  if (raceSummary) {
+    return {
+      kind: 'synced',
+      buttonLabel: 'Watch replay',
+      progress: null,
+      link: 'resync',
+      statusText: describeSyncedRace(raceSummary),
+      isError: false,
+    };
+  }
+
+  return { kind: 'idle', buttonLabel: 'Replay race', progress: null, link: null, statusText: '', isError: false };
+}
+
 const AUTH_STATUSES = [401, 403];
 const RATE_LIMITED_STATUS = 429;
 const SERVER_ERROR_STATUS = 500;
@@ -519,6 +587,76 @@ function throttle(fn, intervalMs) {
   return throttled;
 }
 
+function sampleChartWindow(riders, time, { windowSeconds, stepSeconds, sampleInterval = 1 }) {
+  const labels = [];
+  const series = riders.map(() => ({ power: [], heartRate: [] }));
+  if (!(stepSeconds > 0)) return { labels, series };
+
+  for (let t = Math.max(0, time - windowSeconds); t <= time; t += stepSeconds) {
+    const idx = timeToIndex(t, sampleInterval);
+    labels.push(formatTime(t));
+    riders.forEach((rider, i) => {
+      series[i].power.push(rider.power?.[idx] || 0);
+      series[i].heartRate.push(rider.heartRate?.[idx] || null);
+    });
+  }
+
+  return { labels, series };
+}
+
+const SEEK_STEP_SECONDS = 5;
+const SEEK_SHIFT_STEP_SECONDS = 30;
+const REPEATABLE_SHORTCUTS = ['seekBy', 'changeSpeed'];
+const TEXT_ENTRY_TAGS = ['SELECT', 'TEXTAREA'];
+const NON_TEXT_INPUT_TYPES = ['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file'];
+const ACTIVATABLE_TAGS = ['BUTTON', 'A', 'SUMMARY'];
+const DIGIT_KEY_PATTERN = /^[0-9]$/;
+
+function isTextEntryTarget(target) {
+  if (!target) return false;
+  if (TEXT_ENTRY_TAGS.includes(target.tagName)) return true;
+  if (target.tagName === 'INPUT') return !NON_TEXT_INPUT_TYPES.includes(target.type);
+  return target.isContentEditable === true;
+}
+
+function isActivatableTarget(target) {
+  return Boolean(target) && ACTIVATABLE_TAGS.includes(target.tagName);
+}
+
+function shortcutForKey(key, shiftKey) {
+  if (DIGIT_KEY_PATTERN.test(key)) return { type: 'seekFraction', fraction: Number(key) / 10 };
+
+  const seekStep = shiftKey ? SEEK_SHIFT_STEP_SECONDS : SEEK_STEP_SECONDS;
+  switch (key) {
+    case ' ': return { type: 'togglePlay' };
+    case 'ArrowLeft': return { type: 'seekBy', seconds: -seekStep };
+    case 'ArrowRight': return { type: 'seekBy', seconds: seekStep };
+    case 'ArrowUp': return { type: 'changeSpeed', step: 1 };
+    case 'ArrowDown': return { type: 'changeSpeed', step: -1 };
+    case 'r':
+    case 'R': return { type: 'resetZoom' };
+    case '/': return { type: 'focusSearch' };
+    case '?': return { type: 'toggleHelp' };
+    default: return null;
+  }
+}
+
+function resolveShortcut({ key, shiftKey = false, ctrlKey = false, metaKey = false, altKey = false, repeat = false, target = null }) {
+  if (key === 'Escape') return { type: 'escape' };
+  if (ctrlKey || metaKey || altKey || isTextEntryTarget(target)) return null;
+  if (key === ' ' && isActivatableTarget(target)) return null;
+
+  const action = shortcutForKey(key, shiftKey);
+  if (!action || (repeat && !REPEATABLE_SHORTCUTS.includes(action.type))) return null;
+  return action;
+}
+
+function stepSpeed(speeds, current, step) {
+  const index = speeds.indexOf(current);
+  if (index < 0) return current;
+  return speeds[clamp(index + step, 0, speeds.length - 1)];
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -550,9 +688,15 @@ if (typeof module !== 'undefined' && module.exports) {
     getValueAtDistance,
     isSyncStatusForEvent,
     isSyncStatusStale,
+    buildRaceKey,
+    summarizeSyncedRaces,
+    buildReplayControlState,
     classifyAnalysisResponse,
     debounce,
     throttle,
+    sampleChartWindow,
+    resolveShortcut,
+    stepSpeed,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,
@@ -565,5 +709,7 @@ if (typeof module !== 'undefined' && module.exports) {
     HASH_CATEGORY_PATTERN,
     URL_CATEGORY_PATTERN,
     EVENT_ID_PATTERN,
+    SEEK_STEP_SECONDS,
+    SEEK_SHIFT_STEP_SECONDS,
   };
 }

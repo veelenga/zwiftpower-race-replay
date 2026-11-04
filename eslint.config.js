@@ -30,9 +30,15 @@ const sharedUtils = [
   'getValueAtDistance',
   'isSyncStatusForEvent',
   'isSyncStatusStale',
+  'buildRaceKey',
+  'summarizeSyncedRaces',
+  'buildReplayControlState',
   'classifyAnalysisResponse',
   'debounce',
   'throttle',
+  'sampleChartWindow',
+  'resolveShortcut',
+  'stepSpeed',
 ];
 
 module.exports = [

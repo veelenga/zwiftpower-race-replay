@@ -1,33 +1,31 @@
-/**
- * Race Replay Visualization
- * Loads race data from extension storage and renders interactive replay
- */
-
-// Storage key (shared with other modules)
 const STORAGE_KEY_RACES = 'syncedRaces';
 
-// Replay-specific constants
 const MIN_ZOOM_SELECTION_PX = 20;
 const CHART_UPDATE_INTERVAL_MS = 500;
 const STANDINGS_RENDER_INTERVAL_MS = 100;
 const LIVE_SYNC_DEBOUNCE_MS = 300;
 const CHART_WINDOW_SIZE_SECONDS = 600;
 
-// Elevation profile constants
-const DEFAULT_ELEVATION_SVG_HEIGHT = 150;
-const DEFAULT_ELEVATION_CONTAINER_HEIGHT = 180;
-const ELEVATION_PATH_TOP_PADDING = 20;
+const DEFAULT_ELEVATION_CONTAINER_HEIGHT = 220;
+const PROFILE_TOP_PADDING_PX = 36;
+const PLAYER_BAR_CLEARANCE_PX = 10;
+const POWER_LABEL_OFFSET_PX = 28;
 const ELEVATION_PATH_MAX_POINTS = 300;
-const MARKER_TOP_PADDING = 25;
-const MARKER_BOTTOM_PADDING = 10;
+const CURSOR_INFO_WIDTH_PX = 120;
+const CURSOR_INFO_OFFSET_PX = 10;
 
-// Chart axis limits
-const POWER_CHART_MIN = 0;
-const POWER_CHART_SUGGESTED_MAX = 500;
-const HR_CHART_MIN = 60;
-const HR_CHART_SUGGESTED_MAX = 200;
+const POWER_AXIS_MIN = 0;
+const POWER_AXIS_SUGGESTED_MAX = 500;
+const HR_AXIS_MIN = 60;
+const HR_AXIS_SUGGESTED_MAX = 200;
+const POWER_LINE_WIDTH = 2;
+const HR_LINE_WIDTH = 1.25;
+const HR_LINE_DASH = [5, 4];
+const CHART_TEXT_COLOR = '#8b949e';
+const CHART_GRID_COLOR = '#21262d';
+const CHART_CURSOR_COLOR = 'rgba(255, 255, 255, 0.5)';
+const CHART_TOOLTIP_OFFSET_PX = 12;
 
-// Chart data sampling
 const MIN_CHART_STEP_SECONDS = 10;
 
 const GROUP_COLORS = [
@@ -35,12 +33,11 @@ const GROUP_COLORS = [
   '#ff7b72', '#79c0ff', '#d2a8ff', '#7ee787', '#ffa657',
 ];
 
-// Comparison colors (subset of GROUP_COLORS for up to 4 comparison riders)
 const COMPARE_COLORS = ['#ffd700', '#58a6ff', '#a371f7', '#3fb950'];
 const MAX_COMPARE_RIDERS = 4;
 const WATCHING_COLOR = '#f85149';
+const LEADER_COLOR = '#ffd700';
 
-// State
 let riders = [];
 let totalDistanceKm = 42;
 let watchingPosition = 1;
@@ -50,67 +47,72 @@ let isPlaying = false;
 let playbackSpeed = 10;
 let lastFrameTime = null;
 let animationFrameId = null;
-let powerChart = null;
-let hrChart = null;
+let chart = null;
+let chartSeries = [];
 let elevationData = [];
 let distanceData = [];
-let compareRiders = []; // Array of positions of riders to compare with (max 4)
+let compareRiders = [];
 let expandedGroups = new Set();
 let riderSearchTerm = '';
 let zoomStart = 0;
 let zoomEnd = 1;
 let isDragging = false;
 let dragStartX = 0;
-let sampleInterval = 1; // Data sample interval (1 = every second, 5 = every 5 seconds)
-let lastChartUpdate = 0; // Timestamp for throttling chart updates
+let sampleInterval = 1;
+let lastChartUpdate = 0;
+let legendSignature = '';
+let currentEventId = null;
 const renderStandingsThrottled = throttle(renderStandings, STANDINGS_RENDER_INTERVAL_MS);
 
-// DOM Elements
 const elements = {
   raceInfo: document.getElementById('raceInfo'),
   riderSelect: document.getElementById('riderSelect'),
   syncBanner: document.getElementById('syncBanner'),
   syncText: document.querySelector('#syncBanner .sync-text'),
+  statPosition: document.getElementById('statPosition'),
+  statPower: document.getElementById('statPower'),
+  statLeaderPower: document.getElementById('statLeaderPower'),
+  statGapToLeader: document.getElementById('statGapToLeader'),
+  statGapToGroup: document.getElementById('statGapToGroup'),
   elevationContainer: document.getElementById('elevationContainer'),
   elevationSvg: document.getElementById('elevationSvg'),
   zoomSelection: document.getElementById('zoomSelection'),
-  zoomResetBtn: document.getElementById('zoomResetBtn'),
   cursorLine: document.getElementById('cursorLine'),
   cursorInfo: document.getElementById('cursorInfo'),
   distanceMarkers: document.getElementById('distanceMarkers'),
-  timeDisplay: document.getElementById('timeDisplay'),
+  playerBar: document.getElementById('playerBar'),
   playBtn: document.getElementById('playBtn'),
-  resetBtn: document.getElementById('resetBtn'),
+  timeDisplay: document.getElementById('timeDisplay'),
   timeSlider: document.getElementById('timeSlider'),
-  yourPosition: document.getElementById('yourPosition'),
-  yourPower: document.getElementById('yourPower'),
-  leaderPower: document.getElementById('leaderPower'),
-  gapToLeader: document.getElementById('gapToLeader'),
-  gapToGroup: document.getElementById('gapToGroup'),
-  positionLabel: document.getElementById('positionLabel'),
-  powerLabel: document.getElementById('powerLabel'),
+  speedControl: document.getElementById('speedControl'),
+  speedButtons: [...document.querySelectorAll('#speedControl [data-speed]')],
+  zoomResetBtn: document.getElementById('zoomResetBtn'),
+  shortcutsBtn: document.getElementById('shortcutsBtn'),
+  shortcutsPanel: document.getElementById('shortcutsPanel'),
   standings: document.getElementById('standings'),
   riderSearch: document.getElementById('riderSearch'),
-  comparisonPanel: document.getElementById('comparisonPanel'),
-  compareLabel: document.getElementById('compareLabel'),
-  hrCompareLabel: document.getElementById('hrCompareLabel'),
-  powerChart: document.getElementById('powerChart'),
-  hrChart: document.getElementById('hrChart'),
+  chartLegend: document.getElementById('chartLegend'),
+  chart: document.getElementById('chart'),
+  chartTooltip: document.getElementById('chartTooltip'),
   loadingOverlay: document.getElementById('loadingOverlay'),
   errorOverlay: document.getElementById('errorOverlay'),
   errorText: document.getElementById('errorText'),
 };
 
-// Current event ID for storage listener
-let currentEventId = null;
+const PLAYBACK_SPEEDS = elements.speedButtons.map(btn => Number(btn.dataset.speed));
+
+function shortName(rider) {
+  return rider.name.split(' ')[0];
+}
 
 function getWatchingRiderName() {
   const rider = riders.find(r => r.position === watchingPosition);
-  return rider ? rider.name.split(' ')[0] : 'Rider';
+  return rider ? shortName(rider) : 'Rider';
 }
 
 function selectRider(pos) {
   watchingPosition = pos;
+  compareRiders = compareRiders.filter(p => p !== pos);
   expandedGroups.clear();
   elements.riderSelect.value = pos;
   updateNow();
@@ -125,16 +127,8 @@ function toggleGroup(gIdx) {
   updateNow();
 }
 
-function onCompareRidersChange() {
-  renderComparisonPanel();
-  updateNow();
-}
-
-/**
- * Toggle a rider for comparison
- */
 function toggleCompareRider(pos) {
-  if (pos === watchingPosition) return; // Can't compare with yourself
+  if (pos === watchingPosition) return;
 
   const index = compareRiders.indexOf(pos);
   if (index >= 0) {
@@ -142,31 +136,28 @@ function toggleCompareRider(pos) {
   } else if (compareRiders.length < MAX_COMPARE_RIDERS) {
     compareRiders.push(pos);
   }
-  onCompareRidersChange();
+  updateNow();
 }
 
-/**
- * Remove a rider from comparison
- */
+function clearComparison() {
+  if (compareRiders.length === 0) return;
+  compareRiders = [];
+  updateNow();
+}
+
 function removeCompareRider(pos) {
   const index = compareRiders.indexOf(pos);
   if (index >= 0) {
     compareRiders.splice(index, 1);
-    onCompareRidersChange();
+    updateNow();
   }
 }
 
-/**
- * Get the color for a comparison rider by position
- */
 function getCompareRiderColor(pos) {
   const index = compareRiders.indexOf(pos);
   return index >= 0 ? COMPARE_COLORS[index] : null;
 }
 
-/**
- * Get rider objects for all comparison riders
- */
 function getCompareRiderObjects() {
   return compareRiders
     .map(pos => riders.find(r => r.position === pos))
@@ -180,44 +171,39 @@ function createElement(tag, className, text) {
   return el;
 }
 
-function createCompareChip(rider, color) {
-  const chip = createElement('span', 'compare-chip');
+function createChipRemoveButton(rider) {
+  const button = createElement('button', 'chip-remove', '×');
+  button.type = 'button';
+  button.dataset.pos = rider.position;
+  button.title = 'Remove from comparison';
+  button.setAttribute('aria-label', `Remove ${rider.name} from comparison`);
+  return button;
+}
+
+function createLegendChip({ rider, color, role }) {
+  const chip = createElement('span', `legend-chip ${role}`);
+  chip.setAttribute('role', 'listitem');
   chip.style.setProperty('--chip-color', color);
-  chip.dataset.pos = rider.position;
-
-  const removeBtn = createElement('button', 'chip-remove', '×');
-  removeBtn.dataset.pos = rider.position;
-
-  chip.append(
-    createElement('span', 'chip-star', '★'),
-    createElement('span', 'chip-name', rider.name.split(' ')[0]),
-    removeBtn,
-  );
+  chip.title = role === 'watching' ? `${rider.name} (watching)` : rider.name;
+  chip.append(createElement('span', 'chip-swatch'), createElement('span', 'chip-name', rider.name));
+  if (role === 'leader') chip.append(createElement('span', 'chip-role', 'leader'));
+  if (role === 'compare') chip.append(createChipRemoveButton(rider));
   return chip;
 }
 
-/**
- * Render the comparison panel showing selected riders
- */
-function renderComparisonPanel() {
-  const panel = elements.comparisonPanel;
-  panel.classList.toggle('hidden', compareRiders.length === 0);
-  if (compareRiders.length === 0) return;
+function renderChartLegend(series) {
+  const signature = series.map(({ rider, role }) => `${role}:${rider.position}:${rider.name}`).join('|');
+  if (signature === legendSignature) return;
 
-  const chips = compareRiders.flatMap((pos, idx) => {
-    const rider = riders.find(r => r.position === pos);
-    return rider ? [createCompareChip(rider, COMPARE_COLORS[idx])] : [];
-  });
-
-  panel.replaceChildren(createElement('span', 'compare-label', 'Comparing:'), ...chips);
+  legendSignature = signature;
+  elements.chartLegend.replaceChildren(...series.map(createLegendChip));
 }
 
-function handleComparisonClick(e) {
+function handleLegendClick(e) {
   const removeBtn = e.target.closest('.chip-remove');
   if (removeBtn) removeCompareRider(Number(removeBtn.dataset.pos));
 }
 
-// Data loading
 async function loadRaceData() {
   const urlParams = new URLSearchParams(window.location.search);
   const eventId = urlParams.get('eventId');
@@ -243,13 +229,11 @@ async function loadRaceData() {
     sampleInterval = raceData.riders[0]?.sampleInterval || 1;
     riders = raceData.riders.map(toReplayRider);
 
-    // Find current user or default to first rider
     const currentUser = riders.find(r => r.isCurrentUser);
     watchingPosition = currentUser?.position || riders[0]?.position || 1;
 
     updateMaxTime();
 
-    // Calculate total distance (last element of distance array)
     const maxDistance = Math.max(...riders.map(r => {
       const dist = r.distance;
       return dist && dist.length > 0 ? dist[dist.length - 1] : 0;
@@ -263,8 +247,7 @@ async function loadRaceData() {
 
     populateRiderSelector();
     initElevation();
-    initPowerChart();
-    initHRChart();
+    initChart();
     update();
 
     elements.loadingOverlay.classList.add('hidden');
@@ -312,13 +295,12 @@ function populateRiderSelector() {
   const sortedRiders = [...riders].sort((a, b) => a.position - b.position);
   const options = sortedRiders.map(r => {
     const isSelected = r.position === watchingPosition;
-    const label = `#${r.position} ${r.name}${r.isCurrentUser ? ' (You)' : ''}`;
+    const label = `#${r.position} ${r.name}${r.isCurrentUser ? ' (you)' : ''}`;
     return new Option(label, r.position, isSelected, isSelected);
   });
   elements.riderSelect.replaceChildren(...options);
 }
 
-// Elevation profile
 function elevationPointsInZoom() {
   const zoomStartKm = zoomStart * totalDistanceKm;
   const zoomEndKm = zoomEnd * totalDistanceKm;
@@ -347,32 +329,41 @@ function elevationBounds(points) {
   return { minElev, maxElev };
 }
 
-function initElevation() {
-  const svg = elements.elevationSvg;
-  const container = svg.parentElement;
-  const width = container.clientWidth;
-  const height = svg.clientHeight || DEFAULT_ELEVATION_SVG_HEIGHT;
+function profileGeometry() {
+  const container = elements.elevationContainer;
+  const height = container.clientHeight || DEFAULT_ELEVATION_CONTAINER_HEIGHT;
+  return {
+    width: container.clientWidth,
+    height,
+    top: PROFILE_TOP_PADDING_PX,
+    bottom: height - elements.playerBar.offsetHeight - PLAYER_BAR_CLEARANCE_PX,
+  };
+}
 
+function elevationToY(elev, bounds, geometry) {
+  const range = bounds.maxElev - bounds.minElev || 1;
+  return geometry.bottom - ((elev - bounds.minElev) / range) * (geometry.bottom - geometry.top);
+}
+
+function initElevation() {
   if (!elevationData.length || !distanceData.length) return;
 
   const { zoomStartKm, zoomEndKm, points } = elevationPointsInZoom();
   const zoomRangeKm = zoomEndKm - zoomStartKm;
   if (zoomRangeKm <= 0 || points.length === 0) return;
 
-  const { minElev, maxElev } = elevationBounds(points);
-  const range = maxElev - minElev || 1;
-
+  const geometry = profileGeometry();
+  const bounds = elevationBounds(points);
   const step = Math.max(1, Math.floor(points.length / ELEVATION_PATH_MAX_POINTS));
-  let pathD = `M 0 ${height}`;
+  let pathD = `M 0 ${geometry.height}`;
 
   for (let i = 0; i < points.length; i += step) {
-    const p = points[i];
-    const x = ((p.dist - zoomStartKm) / zoomRangeKm) * width;
-    const y = height - ((p.elev - minElev) / range) * (height - ELEVATION_PATH_TOP_PADDING);
-    pathD += ` L ${x} ${y}`;
+    const x = ((points[i].dist - zoomStartKm) / zoomRangeKm) * geometry.width;
+    pathD += ` L ${x} ${elevationToY(points[i].elev, bounds, geometry)}`;
   }
-  pathD += ` L ${width} ${height} Z`;
+  pathD += ` L ${geometry.width} ${geometry.height} Z`;
 
+  const svg = elements.elevationSvg;
   svg.innerHTML = `
     <defs>
       <linearGradient id="elevGrad" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -382,263 +373,247 @@ function initElevation() {
     </defs>
     <path d="${pathD}" fill="url(#elevGrad)" stroke="#3fb950" stroke-width="2"/>
   `;
-  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('viewBox', `0 0 ${geometry.width} ${geometry.height}`);
 
   updateDistanceMarkers();
 }
 
 function updateDistanceMarkers() {
-  const startKm = (zoomStart * totalDistanceKm).toFixed(1);
-  const endKm = (zoomEnd * totalDistanceKm).toFixed(1);
-  const midKm = ((zoomStart + zoomEnd) / 2 * totalDistanceKm).toFixed(1);
-  const q1Km = ((zoomStart * 3 + zoomEnd) / 4 * totalDistanceKm).toFixed(1);
-  const q3Km = ((zoomStart + zoomEnd * 3) / 4 * totalDistanceKm).toFixed(1);
-  elements.distanceMarkers.innerHTML = `
-    <span>${startKm} km</span>
-    <span>${q1Km} km</span>
-    <span>${midKm} km</span>
-    <span>${q3Km} km</span>
-    <span>${endKm} km</span>
-  `;
+  const markers = [0, 1, 2, 3, 4].map(quarter => {
+    const progress = zoomStart + (zoomEnd - zoomStart) * (quarter / 4);
+    return createElement('span', '', `${(progress * totalDistanceKm).toFixed(1)} km`);
+  });
+  elements.distanceMarkers.replaceChildren(...markers);
 }
 
-// Vertical line plugin for charts - shows on hover with values
 const verticalLinePlugin = {
   id: 'verticalLine',
-  afterDraw: (chart) => {
-    const verticalLineOpts = chart.options.plugins.verticalLine;
-    if (!verticalLineOpts?.show || verticalLineOpts.cursorX === null) return;
+  afterDraw: (target) => {
+    const x = target.options.plugins.verticalLine?.cursorX;
+    const area = target.chartArea;
+    if (x === null || x === undefined || !area || x < area.left || x > area.right) return;
 
-    const ctx = chart.ctx;
-    const xAxis = chart.scales.x;
-    const yAxis = chart.scales.y;
-
-    if (!xAxis || !yAxis) return;
-
-    const x = verticalLineOpts.cursorX;
-
-    // Only draw if x is within chart area
-    if (x < xAxis.left || x > xAxis.right) return;
-
-    // Draw vertical line
+    const ctx = target.ctx;
     ctx.save();
     ctx.beginPath();
-    ctx.moveTo(x, yAxis.top);
-    ctx.lineTo(x, yAxis.bottom);
+    ctx.moveTo(x, area.top);
+    ctx.lineTo(x, area.bottom);
     ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.strokeStyle = CHART_CURSOR_COLOR;
     ctx.stroke();
     ctx.restore();
-  }
+  },
 };
 
-// Get data values at cursor position
-function getChartValuesAtX(chart, x) {
-  const xAxis = chart.scales.x;
-  if (!xAxis || chart.data.labels.length === 0) return null;
-
-  // Find the closest data index to the cursor position
-  const dataIndex = Math.round(xAxis.getValueForPixel(x));
-  if (dataIndex < 0 || dataIndex >= chart.data.labels.length) return null;
-
-  const label = chart.data.labels[dataIndex];
-  const values = chart.data.datasets.map(ds => ({
-    label: ds.label,
-    value: ds.data[dataIndex],
-    color: ds.borderColor
-  }));
-
-  return { label, values, dataIndex };
+function valueAxis(position, title, range) {
+  return {
+    type: 'linear',
+    axis: 'y',
+    position,
+    title: { display: true, text: title, color: CHART_TEXT_COLOR },
+    ticks: { color: CHART_TEXT_COLOR },
+    grid: { color: CHART_GRID_COLOR, drawOnChartArea: position === 'left' },
+    ...range,
+  };
 }
 
-// Shared tooltip element for charts
-let chartTooltip = null;
+function initChart() {
+  chart = new Chart(elements.chart.getContext('2d'), {
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      scales: {
+        x: { ticks: { color: CHART_TEXT_COLOR, maxTicksLimit: 8 }, grid: { color: CHART_GRID_COLOR } },
+        power: valueAxis('left', 'Power (W)', { min: POWER_AXIS_MIN, suggestedMax: POWER_AXIS_SUGGESTED_MAX }),
+        heartRate: valueAxis('right', 'Heart rate (bpm)', { min: HR_AXIS_MIN, suggestedMax: HR_AXIS_SUGGESTED_MAX }),
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false },
+        verticalLine: { cursorX: null },
+      },
+      elements: { point: { radius: 0 }, line: { tension: 0.2 } },
+    },
+    plugins: [verticalLinePlugin],
+  });
+  elements.chart.addEventListener('mousemove', handleChartMouseMove);
+  elements.chart.addEventListener('mouseleave', handleChartMouseLeave);
+}
 
-function getChartTooltip() {
-  if (!chartTooltip) {
-    chartTooltip = document.createElement('div');
-    chartTooltip.className = 'chart-tooltip';
-    chartTooltip.style.cssText = `
-      position: fixed;
-      background: rgba(0, 0, 0, 0.9);
-      border: 1px solid #30363d;
-      border-radius: 4px;
-      padding: 6px 10px;
-      font-size: 12px;
-      color: #f0f6fc;
-      pointer-events: none;
-      z-index: 1000;
-      display: none;
-      white-space: nowrap;
-    `;
-    document.body.appendChild(chartTooltip);
+function chartRiders(you, leader) {
+  const compared = getCompareRiderObjects().map((rider, idx) => ({ rider, color: COMPARE_COLORS[idx], role: 'compare' }));
+  const leaderFallback = leader && leader.position !== you.position
+    ? [{ rider: leader, color: LEADER_COLOR, role: 'leader' }]
+    : [];
+  return [{ rider: you, color: WATCHING_COLOR, role: 'watching' }, ...(compared.length ? compared : leaderFallback)];
+}
+
+function chartDatasets({ rider, color, power, heartRate }) {
+  const name = shortName(rider);
+  return [
+    { label: `${name} power`, data: power, yAxisID: 'power', borderColor: color, borderWidth: POWER_LINE_WIDTH, fill: false },
+    { label: `${name} heart rate`, data: heartRate, yAxisID: 'heartRate', borderColor: color, borderWidth: HR_LINE_WIDTH, borderDash: HR_LINE_DASH, fill: false },
+  ];
+}
+
+function updateChart(t, you, leader) {
+  if (!chart || !you) return;
+
+  const entries = chartRiders(you, leader);
+  const { labels, series } = sampleChartWindow(entries.map(entry => entry.rider), t, {
+    windowSeconds: CHART_WINDOW_SIZE_SECONDS,
+    stepSeconds: Math.max(sampleInterval, MIN_CHART_STEP_SECONDS),
+    sampleInterval,
+  });
+
+  chartSeries = entries.map((entry, idx) => ({ ...entry, ...series[idx] }));
+  chart.data.labels = labels;
+  chart.data.datasets = chartSeries.flatMap(chartDatasets);
+  chart.update('none');
+  renderChartLegend(chartSeries);
+}
+
+function chartIndexAt(x) {
+  const xAxis = chart?.scales.x;
+  const count = chart?.data.labels.length ?? 0;
+  if (!xAxis || count === 0) return -1;
+
+  const index = Math.round(xAxis.getValueForPixel(x));
+  return index >= 0 && index < count ? index : -1;
+}
+
+function formatChartValue(value, unit) {
+  return value === null || value === undefined ? '-' : `${Math.round(value)} ${unit}`;
+}
+
+function chartTooltipRow(entry, index) {
+  const row = createElement('div', 'chart-tooltip-row');
+  const name = createElement('span', 'chart-tooltip-name', shortName(entry.rider));
+  name.style.color = entry.color;
+  row.append(name, ` ${formatChartValue(entry.power[index], 'W')} · ${formatChartValue(entry.heartRate[index], 'bpm')}`);
+  return row;
+}
+
+function renderChartTooltip(index, e) {
+  const tooltip = elements.chartTooltip;
+  tooltip.replaceChildren(
+    createElement('div', 'chart-tooltip-time', chart.data.labels[index]),
+    ...chartSeries.map(entry => chartTooltipRow(entry, index)),
+  );
+  tooltip.classList.remove('hidden');
+
+  const fitsRight = e.clientX + CHART_TOOLTIP_OFFSET_PX + tooltip.offsetWidth <= window.innerWidth;
+  const left = fitsRight ? e.clientX + CHART_TOOLTIP_OFFSET_PX : e.clientX - CHART_TOOLTIP_OFFSET_PX - tooltip.offsetWidth;
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${e.clientY - CHART_TOOLTIP_OFFSET_PX}px`;
+}
+
+function setChartCursor(x) {
+  if (!chart) return;
+  chart.options.plugins.verticalLine.cursorX = x;
+  chart.draw();
+}
+
+function handleChartMouseMove(e) {
+  const x = e.clientX - elements.chart.getBoundingClientRect().left;
+  const index = chartIndexAt(x);
+  setChartCursor(x);
+
+  if (index < 0 || chartSeries.length === 0) {
+    elements.chartTooltip.classList.add('hidden');
+    return;
   }
-  return chartTooltip;
+  renderChartTooltip(index, e);
 }
 
-function setupChartCursorTracking(chart, canvas) {
-  canvas.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-
-    // Update both charts with cursor position
-    if (powerChart) {
-      powerChart.options.plugins.verticalLine.cursorX = x;
-      powerChart.draw();
-    }
-    if (hrChart) {
-      hrChart.options.plugins.verticalLine.cursorX = x;
-      hrChart.draw();
-    }
-
-    // Show tooltip with values
-    const tooltip = getChartTooltip();
-    const data = getChartValuesAtX(chart, x);
-
-    if (data && data.values.length > 0) {
-      const unit = chart === powerChart ? 'W' : 'bpm';
-      let html = `<div style="color: #8b949e; margin-bottom: 4px;">${data.label}</div>`;
-      data.values.forEach(v => {
-        const val = v.value !== undefined && v.value !== null ? Math.round(v.value) : '-';
-        html += `<div><span style="color: ${v.color};">${escapeHtml(v.label)}:</span> ${val}${unit}</div>`;
-      });
-      tooltip.innerHTML = html;
-      tooltip.style.display = 'block';
-      tooltip.style.left = `${e.clientX + 12}px`;
-      tooltip.style.top = `${e.clientY - 10}px`;
-    } else {
-      tooltip.style.display = 'none';
-    }
-  });
-
-  canvas.addEventListener('mouseleave', () => {
-    // Hide line on both charts
-    if (powerChart) {
-      powerChart.options.plugins.verticalLine.cursorX = null;
-      powerChart.draw();
-    }
-    if (hrChart) {
-      hrChart.options.plugins.verticalLine.cursorX = null;
-      hrChart.draw();
-    }
-
-    // Hide tooltip
-    const tooltip = getChartTooltip();
-    tooltip.style.display = 'none';
-  });
+function handleChartMouseLeave() {
+  setChartCursor(null);
+  elements.chartTooltip.classList.add('hidden');
 }
 
-// Power chart
-function initPowerChart() {
-  const ctx = elements.powerChart.getContext('2d');
-  powerChart = new Chart(ctx, {
-    type: 'line',
-    data: { labels: [], datasets: [] },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { enabled: false },
-      scales: {
-        x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: '#21262d' } },
-        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, min: POWER_CHART_MIN, suggestedMax: POWER_CHART_SUGGESTED_MAX },
-      },
-      plugins: {
-        legend: { display: true, labels: { color: '#c9d1d9', boxWidth: 12 } },
-        verticalLine: { show: true, cursorX: null }
-      },
-      elements: { point: { radius: 0 }, line: { tension: 0.2 } },
-    },
-    plugins: [verticalLinePlugin],
-  });
-  setupChartCursorTracking(powerChart, elements.powerChart);
-}
-
-function initHRChart() {
-  const ctx = elements.hrChart.getContext('2d');
-  hrChart = new Chart(ctx, {
-    type: 'line',
-    data: { labels: [], datasets: [] },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { enabled: false },
-      scales: {
-        x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: '#21262d' } },
-        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, min: HR_CHART_MIN, suggestedMax: HR_CHART_SUGGESTED_MAX },
-      },
-      plugins: {
-        legend: { display: true, labels: { color: '#c9d1d9', boxWidth: 12 } },
-        verticalLine: { show: true, cursorX: null }
-      },
-      elements: { point: { radius: 0 }, line: { tension: 0.2 } },
-    },
-    plugins: [verticalLinePlugin],
-  });
-  setupChartCursorTracking(hrChart, elements.hrChart);
-}
-
-// Main update loop
 function update() {
   const t = currentTime;
-  const idx = timeToIndex(t, sampleInterval);
-  elements.timeDisplay.textContent = formatTime(t);
-  elements.timeSlider.value = t;
+  const standings = computeStandings(t);
+  const you = standings.find(r => r.position === watchingPosition);
+  const leader = standings[0];
+  const groups = detectGroups(standings, t, watchingPosition, sampleInterval);
 
-  const standings = riders.map(r => {
+  renderPlaybackTime(t);
+  renderStats({ t, standings, groups, you, leader });
+  renderStandingsThrottled(groups, standings);
+  updateRiderMarkers(groups);
+  updateChartThrottled(t, you, leader);
+}
+
+function updateNow() {
+  lastChartUpdate = 0;
+  update();
+  renderStandingsThrottled.flush();
+}
+
+function computeStandings(t) {
+  const idx = timeToIndex(t, sampleInterval);
+  return riders.map(r => {
     const currentDistance = r.distance?.[idx] ?? (t / (r.duration * sampleInterval) * totalDistanceKm);
     const progress = currentDistance / totalDistanceKm;
     return { ...r, progress, currentDistance, currentPower: r.power[idx] || 0 };
   }).sort((a, b) => b.currentDistance - a.currentDistance);
-
-  const you = standings.find(r => r.position === watchingPosition);
-  const yourRank = standings.findIndex(r => r.position === watchingPosition) + 1;
-  const leader = standings[0];
-
-  const watchingName = getWatchingRiderName();
-  elements.yourPosition.textContent = `#${yourRank}`;
-  elements.yourPower.textContent = you?.currentPower || 0;
-  elements.leaderPower.textContent = leader?.currentPower || 0;
-  elements.positionLabel.textContent = `${watchingName}'s Position`;
-  elements.powerLabel.textContent = `${watchingName}'s Power (W)`;
-
-  const groups = detectGroups(standings, t, watchingPosition, sampleInterval);
-
-  if (you && leader && you !== leader) {
-    const timeToLeader = calcTimeGap(leader, you, t, sampleInterval);
-    elements.gapToLeader.textContent = formatTimeGap(timeToLeader);
-
-    const yourGroupIdx = groups.findIndex(g => g.hasYou);
-    if (yourGroupIdx > 0) {
-      const groupAhead = groups[yourGroupIdx - 1];
-      const lastRiderInGroupAhead = groupAhead.riders[groupAhead.riders.length - 1];
-      const timeToGroup = calcTimeGap(lastRiderInGroupAhead, you, t, sampleInterval);
-      elements.gapToGroup.textContent = formatTimeGap(timeToGroup);
-    } else {
-      elements.gapToGroup.textContent = '-';
-    }
-  } else {
-    elements.gapToLeader.textContent = '-';
-    elements.gapToGroup.textContent = '-';
-  }
-
-  renderStandingsThrottled(groups, standings);
-  updateRiderMarkers(groups);
-
-  // Throttle chart updates during playback for better performance
-  const now = Date.now();
-  if (!isPlaying || now - lastChartUpdate >= CHART_UPDATE_INTERVAL_MS) {
-    const compareTargets = getCompareRiderObjects();
-    updatePowerChart(t, you, compareTargets);
-    updateHRChart(t, you, compareTargets);
-    lastChartUpdate = now;
-  }
 }
 
-function updateNow() {
-  update();
-  renderStandingsThrottled.flush();
+function renderPlaybackTime(t) {
+  const progressPercent = maxTime > 0 ? (t / maxTime) * 100 : 0;
+  elements.timeDisplay.textContent = formatTime(t);
+  elements.timeSlider.value = t;
+  elements.timeSlider.setAttribute('aria-valuetext', formatTime(t));
+  elements.timeSlider.style.setProperty('--progress', `${progressPercent}%`);
+}
+
+function gapStatText(seconds, target) {
+  return seconds > 0 ? `${formatTimeGap(seconds)} to ${target}` : null;
+}
+
+function gapToGroupAhead(groups, you, t) {
+  const yourGroupIdx = groups.findIndex(g => g.hasYou);
+  if (yourGroupIdx <= 0) return 0;
+
+  const groupAhead = groups[yourGroupIdx - 1];
+  const lastRiderAhead = groupAhead.riders[groupAhead.riders.length - 1];
+  return calcTimeGap(lastRiderAhead, you, t, sampleInterval);
+}
+
+function setStat(el, text) {
+  el.classList.toggle('hidden', text === null);
+  el.textContent = text ?? '';
+}
+
+function renderStats({ t, standings, groups, you, leader }) {
+  const watchingName = getWatchingRiderName();
+  const isChasing = Boolean(you && leader && you !== leader);
+  const rank = standings.findIndex(r => r.position === watchingPosition) + 1;
+
+  setStat(elements.statPosition, `#${rank}`);
+  setStat(elements.statPower, `${you?.currentPower || 0} W`);
+  setStat(elements.statLeaderPower, `leader ${leader?.currentPower || 0} W`);
+  setStat(elements.statGapToLeader, isChasing ? gapStatText(calcTimeGap(leader, you, t, sampleInterval), 'leader') : null);
+  setStat(elements.statGapToGroup, isChasing ? gapStatText(gapToGroupAhead(groups, you, t), 'group') : null);
+  elements.statPosition.title = `${watchingName}'s position`;
+  elements.statPower.title = `${watchingName}'s power`;
+}
+
+function updateChartThrottled(t, you, leader) {
+  const now = Date.now();
+  if (isPlaying && now - lastChartUpdate < CHART_UPDATE_INTERVAL_MS) return;
+
+  updateChart(t, you, leader);
+  lastChartUpdate = now;
+}
+
+function compareRowTitle(isComparing) {
+  if (isComparing) return 'Remove from comparison';
+  return compareRiders.length < MAX_COMPARE_RIDERS ? 'Add to comparison' : `Comparison is full (max ${MAX_COMPARE_RIDERS})`;
 }
 
 function renderStandings(groups, standings) {
@@ -646,16 +621,13 @@ function renderStandings(groups, standings) {
   const searchLower = riderSearchTerm.toLowerCase().trim();
 
   groups.forEach((group, gIdx) => {
-    // Filter riders in this group based on search
     const filteredRiders = searchLower
       ? group.riders.filter(r => r.name.toLowerCase().includes(searchLower))
       : group.riders;
 
-    // Skip group if searching and no riders match
     if (searchLower && filteredRiders.length === 0) return;
 
     const isYourGroup = group.hasYou;
-    // Auto-expand when searching, otherwise use normal logic
     const isExpanded = searchLower || isYourGroup || expandedGroups.has(gIdx);
     const headerClasses = ['group-header', isYourGroup ? 'your-group' : ''].filter(Boolean).join(' ');
 
@@ -663,7 +635,7 @@ function renderStandings(groups, standings) {
     const expandIcon = isExpanded ? '▼' : '▶';
     html += `
       <div class="${headerClasses}" data-group="${gIdx}">
-        <span class="group-name"><span class="expand-icon">${expandIcon}</span> ${group.name} (${displayCount})${isYourGroup ? ' ★' : ''}</span>
+        <span class="group-name"><span class="expand-icon">${expandIcon}</span> ${group.name} (${displayCount})</span>
         <span class="group-info">${group.avgPower}W avg ${formatTimeGap(group.timeGapToLeader)}</span>
       </div>`;
 
@@ -677,17 +649,15 @@ function renderStandings(groups, standings) {
         const classes = ['standings-row', isYou ? 'you' : '', isComparing ? 'comparing' : ''].filter(Boolean).join(' ');
 
         const displayName = highlightMatch(r.name, searchLower);
-
-        // Star icon for comparison selection
-        const starStyle = compareColor ? `style="color: ${compareColor}"` : '';
-        const starIcon = isYou ? '' : `<span class="compare-star" ${starStyle}>${isComparing ? '★' : '☆'}</span>`;
+        const compareDot = compareColor ? `<span class="compare-dot" style="background: ${compareColor}"></span>` : '';
+        const rowTitle = isYou ? '' : `title="${compareRowTitle(isComparing)}"`;
 
         html += `
-          <div class="${classes}" data-pos="${r.position}">
+          <div class="${classes}" data-pos="${r.position}" ${rowTitle}>
             <span class="pos">${overallPos}</span>
             <span class="name">${displayName}</span>
+            ${compareDot}
             <span class="power">${r.currentPower}W</span>
-            ${starIcon}
           </div>`;
       });
     }
@@ -707,159 +677,55 @@ function handleStandingsClick(e) {
   else if (row) toggleCompareRider(Number(row.dataset.pos));
 }
 
+function createRiderMarker(r, groupIdx, color) {
+  const isWatching = r.position === watchingPosition;
+  const dot = createElement('div', isWatching ? 'rider-marker you' : 'rider-marker group');
+  if (!isWatching) dot.style.background = color;
+  dot.title = `${r.name}\nGroup ${groupIdx + 1}\n${(r.progress * totalDistanceKm).toFixed(1)} km\n${r.currentPower}W\n\nClick to analyze`;
+  dot.dataset.pos = r.position;
+  dot.onclick = (e) => {
+    e.stopPropagation();
+    selectRider(r.position);
+  };
+  return dot;
+}
+
+function createPowerLabel(r) {
+  return createElement('div', 'rider-power-label', `${r.currentPower}W`);
+}
+
+function placeAt(el, x, y) {
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  return el;
+}
+
 function updateRiderMarkers(groups) {
   const container = elements.elevationContainer;
-  const width = container.clientWidth;
-
-  const { minElev, maxElev } = elevationBounds(elevationPointsInZoom().points);
-  const elevRange = maxElev - minElev || 1;
-
-  container.querySelectorAll('.rider-marker, .rider-power-label').forEach(el => el.remove());
+  const geometry = profileGeometry();
+  const bounds = elevationBounds(elevationPointsInZoom().points);
+  const zoomSpan = zoomEnd - zoomStart;
+  const markers = [];
 
   groups.forEach((group, gIdx) => {
     const color = GROUP_COLORS[gIdx % GROUP_COLORS.length];
-
-    const visibleRiders = group.riders.filter(r =>
-      r.progress >= zoomStart && r.progress <= zoomEnd
-    );
-
-    if (visibleRiders.length === 0) return;
-
-    visibleRiders.forEach((r) => {
-      const x = ((r.progress - zoomStart) / (zoomEnd - zoomStart)) * width;
-
-      const elev = getValueAtDistance(distanceData, elevationData, r.currentDistance);
-      const containerHeight = container.clientHeight || DEFAULT_ELEVATION_CONTAINER_HEIGHT;
-      const markerRange = containerHeight - MARKER_TOP_PADDING - MARKER_BOTTOM_PADDING;
-      const y = containerHeight - MARKER_BOTTOM_PADDING - ((elev - minElev) / elevRange) * markerRange;
-
-      const dot = document.createElement('div');
-      const isWatching = r.position === watchingPosition;
-
-      if (isWatching) {
-        dot.className = 'rider-marker you';
-
-        const powerLabel = document.createElement('div');
-        powerLabel.className = 'rider-power-label';
-        powerLabel.style.left = `${x}px`;
-        powerLabel.style.top = `${y - 28}px`;
-        powerLabel.textContent = `${r.currentPower}W`;
-        container.appendChild(powerLabel);
-      } else {
-        dot.className = 'rider-marker group';
-        dot.style.background = color;
-      }
-
-      dot.style.left = `${x}px`;
-      dot.style.top = `${y}px`;
-      dot.title = `${r.name}\nGroup ${gIdx + 1}\n${(r.progress * totalDistanceKm).toFixed(1)} km\n${r.currentPower}W\n\nClick to analyze`;
-      dot.dataset.pos = r.position;
-
-      dot.onclick = (e) => {
-        e.stopPropagation();
-        selectRider(r.position);
-      };
-
-      container.appendChild(dot);
-    });
-  });
-}
-
-function updatePowerChart(t, you, compareTargets) {
-  if (!powerChart || !you) return;
-
-  const start = Math.max(0, t - CHART_WINDOW_SIZE_SECONDS);
-  const step = Math.max(sampleInterval, MIN_CHART_STEP_SECONDS);
-
-  const labels = [];
-  const youData = [];
-  const compareDatasets = compareTargets.map(() => []);
-
-  for (let i = start; i <= t; i += step) {
-    const idx = timeToIndex(i, sampleInterval);
-    labels.push(formatTime(i));
-    youData.push(you.power[idx] || 0);
-    compareTargets.forEach((target, j) => {
-      compareDatasets[j].push(target.power?.[idx] || 0);
-    });
-  }
-
-  // Update label
-  if (compareTargets.length === 0) {
-    elements.compareLabel.textContent = '';
-  } else {
-    const names = compareTargets.map(r => r.name.split(' ')[0]).join(', ');
-    elements.compareLabel.textContent = `(vs ${names})`;
-  }
-
-  const watchingName = getWatchingRiderName();
-  const datasets = [
-    { label: watchingName, data: youData, borderColor: WATCHING_COLOR, borderWidth: 2, fill: false },
-  ];
-
-  compareTargets.forEach((target, idx) => {
-    datasets.push({
-      label: target.name.split(' ')[0],
-      data: compareDatasets[idx],
-      borderColor: COMPARE_COLORS[idx],
-      borderWidth: 2,
-      fill: false,
-    });
+    group.riders
+      .filter(r => r.progress >= zoomStart && r.progress <= zoomEnd)
+      .forEach((r) => {
+        const x = ((r.progress - zoomStart) / zoomSpan) * geometry.width;
+        const elev = getValueAtDistance(distanceData, elevationData, r.currentDistance);
+        const y = elevationToY(elev, bounds, geometry);
+        markers.push(placeAt(createRiderMarker(r, gIdx, color), x, y));
+        if (r.position === watchingPosition) {
+          markers.push(placeAt(createPowerLabel(r), x, y - POWER_LABEL_OFFSET_PX));
+        }
+      });
   });
 
-  powerChart.data.labels = labels;
-  powerChart.data.datasets = datasets;
-  powerChart.update('none');
+  container.querySelectorAll('.rider-marker, .rider-power-label').forEach(el => el.remove());
+  container.append(...markers);
 }
 
-function updateHRChart(t, you, compareTargets) {
-  if (!hrChart || !you) return;
-
-  const start = Math.max(0, t - CHART_WINDOW_SIZE_SECONDS);
-  const step = Math.max(sampleInterval, MIN_CHART_STEP_SECONDS);
-
-  const labels = [];
-  const youData = [];
-  const compareDatasets = compareTargets.map(() => []);
-
-  for (let i = start; i <= t; i += step) {
-    const idx = timeToIndex(i, sampleInterval);
-    labels.push(formatTime(i));
-    youData.push(you.heartRate?.[idx] || 0);
-    compareTargets.forEach((target, j) => {
-      compareDatasets[j].push(target.heartRate?.[idx] || 0);
-    });
-  }
-
-  // Update label
-  if (compareTargets.length === 0) {
-    elements.hrCompareLabel.textContent = '';
-  } else {
-    const names = compareTargets.map(r => r.name.split(' ')[0]).join(', ');
-    elements.hrCompareLabel.textContent = `(vs ${names})`;
-  }
-
-  const watchingName = getWatchingRiderName();
-  const datasets = [
-    { label: watchingName, data: youData, borderColor: WATCHING_COLOR, borderWidth: 2, fill: false },
-  ];
-
-  compareTargets.forEach((target, idx) => {
-    datasets.push({
-      label: target.name.split(' ')[0],
-      data: compareDatasets[idx],
-      borderColor: COMPARE_COLORS[idx],
-      borderWidth: 2,
-      fill: false,
-    });
-  });
-
-  hrChart.data.labels = labels;
-  hrChart.data.datasets = datasets;
-  hrChart.update('none');
-}
-
-// Playback controls using requestAnimationFrame for smooth animation
 function gameLoop(timestamp) {
   if (!isPlaying) return;
 
@@ -869,11 +735,7 @@ function gameLoop(timestamp) {
 
   const deltaMs = timestamp - lastFrameTime;
   lastFrameTime = timestamp;
-
-  // Calculate time increment based on playback speed
-  // deltaMs is in milliseconds, we want to advance currentTime by (deltaMs/1000 * playbackSpeed) seconds
-  const timeIncrement = (deltaMs / 1000) * playbackSpeed;
-  currentTime += timeIncrement;
+  currentTime += (deltaMs / 1000) * playbackSpeed;
 
   if (currentTime >= maxTime) {
     currentTime = maxTime;
@@ -886,19 +748,23 @@ function gameLoop(timestamp) {
   animationFrameId = requestAnimationFrame(gameLoop);
 }
 
+function renderPlayState() {
+  elements.playBtn.setAttribute('aria-pressed', String(isPlaying));
+  elements.playBtn.title = isPlaying ? 'Pause' : 'Play';
+}
+
 function play() {
   if (isPlaying) return;
+  if (currentTime >= maxTime) currentTime = 0;
   isPlaying = true;
   lastFrameTime = null;
-  elements.playBtn.textContent = 'Pause';
-  elements.playBtn.classList.remove('primary');
+  renderPlayState();
   animationFrameId = requestAnimationFrame(gameLoop);
 }
 
 function pause() {
   isPlaying = false;
-  elements.playBtn.textContent = 'Play';
-  elements.playBtn.classList.add('primary');
+  renderPlayState();
   if (animationFrameId) {
     cancelAnimationFrame(animationFrameId);
     animationFrameId = null;
@@ -906,141 +772,198 @@ function pause() {
   lastFrameTime = null;
 }
 
-// Event listeners
+function togglePlay() {
+  if (isPlaying) pause();
+  else play();
+}
+
+function seekTo(time) {
+  currentTime = clamp(time, 0, maxTime);
+  update();
+}
+
+function setPlaybackSpeed(speed) {
+  playbackSpeed = speed;
+  elements.speedButtons.forEach(btn => {
+    btn.setAttribute('aria-pressed', String(Number(btn.dataset.speed) === speed));
+  });
+}
+
+function handleSpeedClick(e) {
+  const button = e.target.closest('[data-speed]');
+  if (button) setPlaybackSpeed(Number(button.dataset.speed));
+}
+
+function isZoomed() {
+  return zoomStart !== 0 || zoomEnd !== 1;
+}
+
+function setZoom(start, end) {
+  zoomStart = start;
+  zoomEnd = end;
+  elements.zoomResetBtn.classList.toggle('hidden', !isZoomed());
+  initElevation();
+  update();
+}
+
+function resetZoom() {
+  if (isZoomed()) setZoom(0, 1);
+}
+
+function profilePointer(e) {
+  const rect = elements.elevationContainer.getBoundingClientRect();
+  return { x: clamp(e.clientX - rect.left, 0, rect.width), width: rect.width };
+}
+
+function renderZoomSelection(currentX) {
+  elements.zoomSelection.style.left = `${Math.min(dragStartX, currentX)}px`;
+  elements.zoomSelection.style.width = `${Math.abs(currentX - dragStartX)}px`;
+}
+
+function startZoomDrag(e) {
+  if (e.target.closest('.rider-marker')) return;
+  isDragging = true;
+  dragStartX = profilePointer(e).x;
+  renderZoomSelection(dragStartX);
+  elements.zoomSelection.style.display = 'block';
+}
+
+function trackZoomDrag(e) {
+  if (isDragging) renderZoomSelection(profilePointer(e).x);
+}
+
+function finishZoomDrag(e) {
+  if (!isDragging) return;
+  isDragging = false;
+  elements.zoomSelection.style.display = 'none';
+
+  const { x, width } = profilePointer(e);
+  const startPx = Math.min(dragStartX, x);
+  const endPx = Math.max(dragStartX, x);
+  if (endPx - startPx < MIN_ZOOM_SELECTION_PX) {
+    resetZoom();
+    return;
+  }
+
+  const zoomSpan = zoomEnd - zoomStart;
+  setZoom(
+    Math.max(0, zoomStart + (startPx / width) * zoomSpan),
+    Math.min(1, zoomStart + (endPx / width) * zoomSpan),
+  );
+}
+
+function showProfileCursor(e) {
+  if (isDragging) return;
+
+  const { x, width } = profilePointer(e);
+  const distanceKm = (zoomStart + (x / width) * (zoomEnd - zoomStart)) * totalDistanceKm;
+  const elevation = getValueAtDistance(distanceData, elevationData, distanceKm);
+  const fitsRight = x + CURSOR_INFO_OFFSET_PX + CURSOR_INFO_WIDTH_PX <= width;
+  const infoLeft = fitsRight ? x + CURSOR_INFO_OFFSET_PX : x - CURSOR_INFO_WIDTH_PX - CURSOR_INFO_OFFSET_PX;
+
+  elements.cursorLine.style.left = `${x}px`;
+  elements.cursorLine.style.display = 'block';
+  elements.cursorInfo.style.left = `${infoLeft}px`;
+  elements.cursorInfo.style.display = 'block';
+  elements.cursorInfo.innerHTML = `
+    <span class="value">${distanceKm.toFixed(2)} km</span><br>
+    <span style="color: #3fb950;">${Math.round(elevation)}m</span> elevation
+  `;
+}
+
+function hideProfileCursor() {
+  elements.cursorLine.style.display = 'none';
+  elements.cursorInfo.style.display = 'none';
+}
+
+function isShortcutsPanelOpen() {
+  return elements.shortcutsBtn.getAttribute('aria-expanded') === 'true';
+}
+
+function setShortcutsPanelOpen(open) {
+  elements.shortcutsPanel.classList.toggle('hidden', !open);
+  elements.shortcutsBtn.setAttribute('aria-expanded', String(open));
+}
+
+function toggleShortcutsPanel() {
+  setShortcutsPanelOpen(!isShortcutsPanelOpen());
+}
+
+function closeShortcutsOnOutsideClick(e) {
+  if (!isShortcutsPanelOpen() || e.target.closest('#shortcutsPanel, #shortcutsBtn')) return;
+  setShortcutsPanelOpen(false);
+}
+
+function handleEscape() {
+  if (isShortcutsPanelOpen()) {
+    setShortcutsPanelOpen(false);
+    return;
+  }
+  clearComparison();
+  elements.riderSearch.blur();
+}
+
+const shortcutHandlers = {
+  togglePlay: () => togglePlay(),
+  seekBy: ({ seconds }) => seekTo(currentTime + seconds),
+  seekFraction: ({ fraction }) => seekTo(maxTime * fraction),
+  changeSpeed: ({ step }) => setPlaybackSpeed(stepSpeed(PLAYBACK_SPEEDS, playbackSpeed, step)),
+  resetZoom: () => resetZoom(),
+  focusSearch: () => elements.riderSearch.focus(),
+  escape: () => handleEscape(),
+  toggleHelp: () => toggleShortcutsPanel(),
+};
+
+function handleShortcutKey(e) {
+  const action = resolveShortcut(e);
+  if (!action) return;
+  e.preventDefault();
+  shortcutHandlers[action.type](action);
+}
+
+function releasePointerFocus(e) {
+  const button = e.target.closest('button');
+  if (button && e.detail > 0) button.blur();
+}
+
+function initKeyboardControls() {
+  document.addEventListener('keydown', handleShortcutKey);
+  document.addEventListener('click', releasePointerFocus);
+  document.addEventListener('click', closeShortcutsOnOutsideClick);
+  elements.shortcutsBtn.addEventListener('click', toggleShortcutsPanel);
+}
+
+function initPlayerControls() {
+  elements.playBtn.addEventListener('click', togglePlay);
+  elements.timeSlider.addEventListener('input', (e) => seekTo(Number(e.target.value)));
+  elements.speedControl.addEventListener('click', handleSpeedClick);
+  elements.zoomResetBtn.addEventListener('click', resetZoom);
+  setPlaybackSpeed(playbackSpeed);
+  renderPlayState();
+}
+
+function initProfileInteractions() {
+  const container = elements.elevationContainer;
+  container.addEventListener('mousedown', startZoomDrag);
+  container.addEventListener('mousemove', showProfileCursor);
+  container.addEventListener('mouseleave', hideProfileCursor);
+  document.addEventListener('mousemove', trackZoomDrag);
+  document.addEventListener('mouseup', finishZoomDrag);
+  window.addEventListener('resize', initElevation);
+}
+
 function initEventListeners() {
-  elements.playBtn.onclick = () => isPlaying ? pause() : play();
-  elements.resetBtn.onclick = () => { pause(); currentTime = 0; update(); };
-  elements.timeSlider.oninput = (e) => { currentTime = +e.target.value; update(); };
-  elements.riderSelect.onchange = (e) => selectRider(parseInt(e.target.value));
-
+  initPlayerControls();
+  initProfileInteractions();
+  initKeyboardControls();
+  elements.riderSelect.addEventListener('change', (e) => selectRider(Number(e.target.value)));
   elements.standings.addEventListener('click', handleStandingsClick);
-  elements.comparisonPanel.addEventListener('click', handleComparisonClick);
-
-  // Rider search
-  elements.riderSearch.oninput = (e) => {
+  elements.chartLegend.addEventListener('click', handleLegendClick);
+  elements.riderSearch.addEventListener('input', (e) => {
     riderSearchTerm = e.target.value;
     updateNow();
-  };
-
-  document.querySelectorAll('[data-speed]').forEach(btn => {
-    btn.onclick = (e) => {
-      playbackSpeed = +e.target.dataset.speed;
-      document.querySelectorAll('[data-speed]').forEach(b => b.classList.remove('active'));
-      e.target.classList.add('active');
-    };
   });
-
-  window.addEventListener('resize', initElevation);
-
-  // Zoom
-  elements.elevationContainer.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.zoom-controls')) return;
-    if (e.target.closest('.rider-marker')) return;
-    isDragging = true;
-    const rect = elements.elevationContainer.getBoundingClientRect();
-    dragStartX = e.clientX - rect.left;
-    elements.zoomSelection.style.left = `${dragStartX}px`;
-    elements.zoomSelection.style.width = '0px';
-    elements.zoomSelection.style.display = 'block';
-  });
-
-  elements.elevationContainer.addEventListener('mousemove', (e) => {
-    const rect = elements.elevationContainer.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const containerWidth = rect.width;
-
-    // Cursor info
-    if (!isDragging) {
-      const progress = zoomStart + (x / containerWidth) * (zoomEnd - zoomStart);
-      const distanceKm = progress * totalDistanceKm;
-
-      const elevation = getValueAtDistance(distanceData, elevationData, distanceKm);
-
-      elements.cursorLine.style.left = `${x}px`;
-      elements.cursorLine.style.display = 'block';
-
-      const infoWidth = 120;
-      const infoLeft = x + 10 + infoWidth > containerWidth ? x - infoWidth - 10 : x + 10;
-      elements.cursorInfo.style.left = `${infoLeft}px`;
-      elements.cursorInfo.style.display = 'block';
-      elements.cursorInfo.innerHTML = `
-        <span class="value">${distanceKm.toFixed(2)} km</span><br>
-        <span style="color: #3fb950;">${Math.round(elevation)}m</span> elevation
-      `;
-    }
-
-    // Zoom selection
-    if (isDragging) {
-      const currentX = e.clientX - rect.left;
-      const left = Math.min(dragStartX, currentX);
-      const width = Math.abs(currentX - dragStartX);
-      elements.zoomSelection.style.left = `${left}px`;
-      elements.zoomSelection.style.width = `${width}px`;
-    }
-  });
-
-  // Handle mouseup on document to support dragging to edges
-  document.addEventListener('mouseup', (e) => {
-    if (!isDragging) return;
-    isDragging = false;
-    elements.zoomSelection.style.display = 'none';
-
-    const rect = elements.elevationContainer.getBoundingClientRect();
-    const containerWidth = rect.width;
-    // Clamp currentX to container bounds
-    const currentX = Math.max(0, Math.min(containerWidth, e.clientX - rect.left));
-
-    const startPx = Math.min(dragStartX, currentX);
-    const endPx = Math.max(dragStartX, currentX);
-
-    if (endPx - startPx < MIN_ZOOM_SELECTION_PX) {
-      if (zoomStart !== 0 || zoomEnd !== 1) {
-        zoomStart = 0;
-        zoomEnd = 1;
-        elements.zoomResetBtn.disabled = true;
-        initElevation();
-        update();
-      }
-      return;
-    }
-
-    const startProgress = zoomStart + (startPx / containerWidth) * (zoomEnd - zoomStart);
-    const endProgress = zoomStart + (endPx / containerWidth) * (zoomEnd - zoomStart);
-
-    zoomStart = Math.max(0, startProgress);
-    zoomEnd = Math.min(1, endProgress);
-
-    elements.zoomResetBtn.disabled = false;
-    initElevation();
-    update();
-  });
-
-  // Update selection when dragging outside container
-  document.addEventListener('mousemove', (e) => {
-    if (!isDragging) return;
-    const rect = elements.elevationContainer.getBoundingClientRect();
-    const containerWidth = rect.width;
-    // Clamp to container bounds
-    const currentX = Math.max(0, Math.min(containerWidth, e.clientX - rect.left));
-    const left = Math.min(dragStartX, currentX);
-    const width = Math.abs(currentX - dragStartX);
-    elements.zoomSelection.style.left = `${left}px`;
-    elements.zoomSelection.style.width = `${width}px`;
-  });
-
-  elements.elevationContainer.addEventListener('mouseleave', () => {
-    // Don't cancel drag on mouseleave - let document handle it
-    elements.cursorLine.style.display = 'none';
-    elements.cursorInfo.style.display = 'none';
-  });
-
-  elements.zoomResetBtn.addEventListener('click', () => {
-    zoomStart = 0;
-    zoomEnd = 1;
-    elements.zoomResetBtn.disabled = true;
-    initElevation();
-    update();
-  });
+  document.getElementById('closeBtn').addEventListener('click', () => window.close());
 }
 
 function applyLiveRaceData(raceData) {
@@ -1063,11 +986,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (raceData) applyLiveRaceDataDebounced(raceData);
 });
 
-// Initialize
 document.addEventListener('DOMContentLoaded', () => {
   initEventListeners();
   loadRaceData();
-
-  // Close button for error overlay
-  document.getElementById('closeBtn')?.addEventListener('click', () => window.close());
 });
