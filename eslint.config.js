@@ -40,6 +40,7 @@ const sharedUtils = [
   'sampleChartWindow',
   'resolveShortcut',
   'stepSpeed',
+  'PLAYBACK_SPEEDS',
   'resolveCourseKm',
   'buildCurveLookup',
   'parseProfileGeometry',

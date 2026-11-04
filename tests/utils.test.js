@@ -61,6 +61,7 @@ const {
   DEFAULT_SPEED_KMH,
   SEEK_STEP_SECONDS,
   SEEK_SHIFT_STEP_SECONDS,
+  PLAYBACK_SPEEDS,
 } = require('../src/utils');
 
 describe('formatTime', () => {
@@ -1330,7 +1331,11 @@ describe('resolveShortcut', () => {
 });
 
 describe('stepSpeed', () => {
-  const speeds = [1, 5, 10, 30];
+  const speeds = PLAYBACK_SPEEDS;
+
+  test('uses the shared playback speeds', () => {
+    expect(PLAYBACK_SPEEDS).toEqual([1, 5, 10, 30]);
+  });
 
   test('moves to the next or previous speed', () => {
     expect(stepSpeed(speeds, 10, 1)).toBe(30);
@@ -1644,9 +1649,9 @@ describe('buildWatchOptions', () => {
       { position: 3, zwiftId: '13', name: 'Martin Rank' },
     ];
     expect(buildWatchOptions(riders)).toEqual([
-      { value: '11', label: '#1 Anna Lee' },
-      { value: '13', label: '#3 Martin Rank' },
-      { value: '17', label: '#7 Vitalii E (you)' },
+      { value: '11', position: 1, label: '#1 Anna Lee' },
+      { value: '13', position: 3, label: '#3 Martin Rank' },
+      { value: '17', position: 7, label: '#7 Vitalii E (you)' },
     ]);
   });
 

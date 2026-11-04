@@ -608,6 +608,7 @@ function sampleChartWindow(riders, time, { windowSeconds, stepSeconds, sampleInt
   return { labels, series };
 }
 
+const PLAYBACK_SPEEDS = [1, 5, 10, 30];
 const SEEK_STEP_SECONDS = 5;
 const SEEK_SHIFT_STEP_SECONDS = 30;
 const REPEATABLE_SHORTCUTS = ['seekBy', 'changeSpeed'];
@@ -789,6 +790,7 @@ function buildWatchOptions(riders) {
     .sort((a, b) => a.position - b.position)
     .map(rider => ({
       value: rider.zwiftId,
+      position: rider.position,
       label: `#${rider.position} ${rider.name}${rider.isCurrentUser ? ' (you)' : ''}`,
     }));
 }
@@ -900,6 +902,7 @@ if (typeof module !== 'undefined' && module.exports) {
     HASH_CATEGORY_PATTERN,
     URL_CATEGORY_PATTERN,
     EVENT_ID_PATTERN,
+    PLAYBACK_SPEEDS,
     SEEK_STEP_SECONDS,
     SEEK_SHIFT_STEP_SECONDS,
   };

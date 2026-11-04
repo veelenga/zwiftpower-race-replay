@@ -99,8 +99,6 @@ const elements = {
   errorText: document.getElementById('errorText'),
 };
 
-const PLAYBACK_SPEEDS = elements.speedButtons.map(btn => Number(btn.dataset.speed));
-
 function shortName(rider) {
   return rider.name.split(' ')[0];
 }
@@ -229,8 +227,7 @@ async function loadRaceData() {
     sampleInterval = raceData.riders[0]?.sampleInterval || 1;
     riders = raceData.riders.map(toReplayRider);
 
-    const currentUser = riders.find(r => r.isCurrentUser);
-    watchingPosition = currentUser?.position || riders[0]?.position || 1;
+    watchingPosition = findWatchedRider(riders)?.position ?? 1;
 
     updateMaxTime();
 
@@ -292,11 +289,9 @@ function showError(message) {
 }
 
 function populateRiderSelector() {
-  const sortedRiders = [...riders].sort((a, b) => a.position - b.position);
-  const options = sortedRiders.map(r => {
-    const isSelected = r.position === watchingPosition;
-    const label = `#${r.position} ${r.name}${r.isCurrentUser ? ' (you)' : ''}`;
-    return new Option(label, r.position, isSelected, isSelected);
+  const options = buildWatchOptions(riders).map(({ label, position }) => {
+    const isSelected = position === watchingPosition;
+    return new Option(label, position, isSelected, isSelected);
   });
   elements.riderSelect.replaceChildren(...options);
 }
@@ -575,15 +570,6 @@ function gapStatText(seconds, target) {
   return seconds > 0 ? `${formatTimeGap(seconds)} to ${target}` : null;
 }
 
-function gapToGroupAhead(groups, you, t) {
-  const yourGroupIdx = groups.findIndex(g => g.hasYou);
-  if (yourGroupIdx <= 0) return 0;
-
-  const groupAhead = groups[yourGroupIdx - 1];
-  const lastRiderAhead = groupAhead.riders[groupAhead.riders.length - 1];
-  return calcTimeGap(lastRiderAhead, you, t, sampleInterval);
-}
-
 function setStat(el, text) {
   el.classList.toggle('hidden', text === null);
   el.textContent = text ?? '';
@@ -593,12 +579,13 @@ function renderStats({ t, standings, groups, you, leader }) {
   const watchingName = getWatchingRiderName();
   const isChasing = Boolean(you && leader && you !== leader);
   const rank = standings.findIndex(r => r.position === watchingPosition) + 1;
+  const yourGroupIndex = groups.findIndex(g => g.hasYou);
 
   setStat(elements.statPosition, `#${rank}`);
   setStat(elements.statPower, `${you?.currentPower || 0} W`);
   setStat(elements.statLeaderPower, `leader ${leader?.currentPower || 0} W`);
   setStat(elements.statGapToLeader, isChasing ? gapStatText(calcTimeGap(leader, you, t, sampleInterval), 'leader') : null);
-  setStat(elements.statGapToGroup, isChasing ? gapStatText(gapToGroupAhead(groups, you, t), 'group') : null);
+  setStat(elements.statGapToGroup, isChasing ? gapStatText(calcGapToGroupAhead(groups, yourGroupIndex, you, t, sampleInterval), 'group') : null);
   elements.statPosition.title = `${watchingName}'s position`;
   elements.statPower.title = `${watchingName}'s power`;
 }
@@ -735,10 +722,9 @@ function gameLoop(timestamp) {
 
   const deltaMs = timestamp - lastFrameTime;
   lastFrameTime = timestamp;
-  currentTime += (deltaMs / 1000) * playbackSpeed;
+  currentTime = advancePlaybackTime(currentTime, deltaMs, playbackSpeed, maxTime);
 
   if (currentTime >= maxTime) {
-    currentTime = maxTime;
     pause();
     update();
     return;

@@ -20,7 +20,6 @@ const INLINE_HOVER_EVENTS = [
   ['mouseout', 'relatedTarget'],
   ['focusout', 'relatedTarget'],
 ];
-const INLINE_SPEEDS = [1, 5, 10, 30];
 const INLINE_DEFAULT_SPEED = 10;
 
 const inlineReplay = {
@@ -238,7 +237,7 @@ function createInlineScrubber() {
 
 function createInlineSpeedButtons() {
   const element = createControlElement('div', 'zp-replay-speeds');
-  const buttons = INLINE_SPEEDS.map(speed => {
+  const buttons = PLAYBACK_SPEEDS.map(speed => {
     const button = createControlButton('zp-replay-speed', () => setInlineSpeed(speed));
     button.textContent = `${speed}x`;
     return button;
@@ -574,7 +573,7 @@ function renderInlinePlayState() {
 
 function renderInlineSpeed() {
   inlineReplay.view?.bar.speedButtons.forEach((button, index) => {
-    setIfChanged(button, 'aria-pressed', String(INLINE_SPEEDS[index] === inlineReplay.speed));
+    setIfChanged(button, 'aria-pressed', String(PLAYBACK_SPEEDS[index] === inlineReplay.speed));
   });
 }
 
