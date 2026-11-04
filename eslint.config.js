@@ -46,6 +46,8 @@ const sharedUtils = [
   'alignNearEdges',
   'computeRaceStandings',
   'calcStandingGap',
+  'calcGapToGroupAhead',
+  'advancePlaybackTime',
   'calcRaceDuration',
   'findWatchedRider',
   'riderMarkerRole',

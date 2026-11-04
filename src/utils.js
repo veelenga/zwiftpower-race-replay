@@ -728,6 +728,18 @@ function calcStandingGap(ahead, behind, time, sampleInterval = 1) {
   return calcTimeGap(ahead, behind, time, sampleInterval);
 }
 
+function calcGapToGroupAhead(groups, watching, time, sampleInterval = 1) {
+  const groupIndex = groups.findIndex(group => group.hasYou);
+  if (!watching || groupIndex <= 0) return 0;
+
+  const groupAhead = groups[groupIndex - 1];
+  return calcStandingGap(groupAhead.riders[groupAhead.riders.length - 1], watching, time, sampleInterval);
+}
+
+function advancePlaybackTime(time, elapsedMs, speed, maxTime) {
+  return clamp(time + (elapsedMs / MS_PER_SECOND) * speed, 0, maxTime);
+}
+
 function calcRaceDuration(riders, sampleInterval = 1) {
   return Math.max(0, ...riders.map(rider => Math.max((rider.distance?.length || 0) - 1, 0) * sampleInterval));
 }
@@ -804,6 +816,8 @@ if (typeof module !== 'undefined' && module.exports) {
     alignNearEdges,
     computeRaceStandings,
     calcStandingGap,
+    calcGapToGroupAhead,
+    advancePlaybackTime,
     calcRaceDuration,
     findWatchedRider,
     riderMarkerRole,

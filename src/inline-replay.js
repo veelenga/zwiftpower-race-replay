@@ -13,6 +13,8 @@ const INLINE_TOOLTIP_EDGE_PX = 90;
 const INLINE_TOOLTIP_FLIP_PX = 56;
 const INLINE_TOOLTIP_GAP_PX = 10;
 const INLINE_TOOLTIP_SHIFTS = { start: '0%', middle: '-50%', end: '-100%' };
+const INLINE_SPEEDS = [1, 5, 10, 30];
+const INLINE_DEFAULT_SPEED = 10;
 
 const inlineReplay = {
   raceKey: null,
@@ -23,8 +25,17 @@ const inlineReplay = {
   courseKm: 0,
   maxTime: 0,
   time: 0,
+  speed: INLINE_DEFAULT_SPEED,
+  playing: false,
+  frameId: null,
+  lastFrameAt: null,
   hoveredId: null,
   view: null,
+};
+
+const INLINE_SHORTCUTS = {
+  togglePlay: () => toggleInlinePlayback(),
+  seekBy: ({ seconds }) => seekInline(inlineReplay.time + seconds),
 };
 
 function createSvgElement(tagName, className) {
@@ -109,10 +120,19 @@ function hoverInlineDot(zwiftId) {
   renderInlineFrame();
 }
 
+function handleInlineKeydown(event) {
+  const action = resolveShortcut(event);
+  const run = action && INLINE_SHORTCUTS[action.type];
+  if (!run) return;
+  event.preventDefault();
+  run(action);
+}
+
 function createInlineLayer() {
   const layer = createSvgElement('svg', 'zp-replay-layer');
   layer.setAttribute('role', 'group');
   layer.setAttribute('aria-label', 'Race replay riders');
+  layer.addEventListener('keydown', handleInlineKeydown);
   layer.addEventListener('mouseover', event => hoverInlineDot(dotIdFrom(event.target)));
   layer.addEventListener('mouseout', event => hoverInlineDot(dotIdFrom(event.relatedTarget)));
   layer.addEventListener('focusin', event => hoverInlineDot(dotIdFrom(event.target)));
@@ -129,6 +149,52 @@ function createInlineTooltip() {
   return { element, name, stats, transform: null };
 }
 
+function createInlineScrubber() {
+  const scrubber = createControlElement('input', 'zp-replay-scrubber');
+  scrubber.type = 'range';
+  scrubber.min = '0';
+  scrubber.step = '1';
+  scrubber.value = '0';
+  scrubber.setAttribute('aria-label', 'Race time');
+  scrubber.addEventListener('input', () => seekInline(Number(scrubber.value)));
+  return scrubber;
+}
+
+function createInlineSpeedButtons() {
+  const element = createControlElement('div', 'zp-replay-speeds');
+  const buttons = INLINE_SPEEDS.map(speed => {
+    const button = createControlButton('zp-replay-speed', () => setInlineSpeed(speed));
+    button.textContent = `${speed}x`;
+    return button;
+  });
+  element.setAttribute('role', 'group');
+  element.setAttribute('aria-label', 'Playback speed');
+  element.append(...buttons);
+  return { element, buttons };
+}
+
+function createInlineBar() {
+  const element = createControlElement('div', 'zp-replay-bar');
+  const controls = createControlElement('div', 'zp-replay-bar-row');
+  const details = createControlElement('div', 'zp-replay-bar-row');
+  const play = createControlButton('zp-replay-play', toggleInlinePlayback);
+  const time = createTextSlot('span', 'zp-replay-time');
+  const scrubber = createInlineScrubber();
+  const speeds = createInlineSpeedButtons();
+  const stats = createTextSlot('span', 'zp-replay-stats');
+  const open = createControlButton('zp-replay-link zp-replay-open', openFullInlineReplay);
+
+  open.textContent = 'Open full replay';
+  element.tabIndex = -1;
+  element.setAttribute('role', 'group');
+  element.setAttribute('aria-label', 'Race replay');
+  element.addEventListener('keydown', handleInlineKeydown);
+  controls.append(play, time.element, scrubber, speeds.element);
+  details.append(stats.element, open);
+  element.append(controls, details);
+  return { element, play, time, scrubber, speedButtons: speeds.buttons, stats };
+}
+
 function mountInlineView({ graph, path, plot }) {
   const view = {
     graph,
@@ -136,6 +202,7 @@ function mountInlineView({ graph, path, plot }) {
     plot,
     layer: createInlineLayer(),
     tooltip: createInlineTooltip(),
+    bar: createInlineBar(),
     dots: new Map(),
     observers: [],
     geometry: null,
@@ -144,6 +211,7 @@ function mountInlineView({ graph, path, plot }) {
 
   graph.classList.add(INLINE_HOST_CLASS);
   graph.append(view.layer, view.tooltip.element);
+  graph.after(view.bar.element);
   view.geometry = measureProfile(view);
   observeProfileSize(view);
   inlineReplay.view = view;
@@ -153,9 +221,11 @@ function unmountInlineView() {
   const { view } = inlineReplay;
   if (!view) return;
 
+  pauseInline();
   view.observers.forEach(observer => observer.disconnect());
   view.layer.remove();
   view.tooltip.element.remove();
+  view.bar.element.remove();
   view.graph.classList.remove(INLINE_HOST_CLASS);
   inlineReplay.view = null;
 }
@@ -165,7 +235,8 @@ function isInlineViewCurrent(target) {
   return Boolean(view && target) &&
     view.graph === target.graph &&
     view.path === target.path &&
-    view.layer.isConnected;
+    view.layer.isConnected &&
+    view.bar.element.isConnected;
 }
 
 function ensureInlineView() {
@@ -184,7 +255,6 @@ function ensureInlineView() {
 function createRiderDot(rider) {
   const element = createSvgElement('g', INLINE_DOT_CLASS);
   const circle = createSvgElement('circle');
-  element.setAttribute('tabindex', '0');
   element.setAttribute('role', 'img');
   element.setAttribute('aria-label', rider.name);
   element.dataset.zwiftId = rider.zwiftId;
@@ -234,7 +304,9 @@ function syncInlineDots(view) {
 
   riders.forEach(rider => {
     const dot = view.dots.get(rider.zwiftId) || addRiderDot(view, rider);
-    setDotLabel(dot, rider.position === watchingPosition ? rider.name : null);
+    const isWatched = rider.position === watchingPosition;
+    dot.element.setAttribute('tabindex', isWatched ? '0' : '-1');
+    setDotLabel(dot, isWatched ? rider.name : null);
   });
   raiseWatchedDot(view);
 }
@@ -335,6 +407,30 @@ function renderInlineTooltip(view, snapshot) {
   tooltip.element.style.transform = transform;
 }
 
+function watchedStatsText({ standings, groups, leader, you }) {
+  if (!you) return '';
+  const { time, sampleInterval } = inlineReplay;
+  return buildRiderStatsText({
+    rank: standings.indexOf(you) + 1,
+    power: you.currentPower,
+    leaderPower: leader.currentPower,
+    gapToLeader: calcStandingGap(leader, you, time, sampleInterval),
+    gapToGroup: calcGapToGroupAhead(groups, you, time, sampleInterval),
+  });
+}
+
+function renderInlineControls(view, snapshot) {
+  const { bar } = view;
+  const { time, maxTime } = inlineReplay;
+  const timeText = `${formatTime(time)} / ${formatTime(maxTime)}`;
+  if (bar.time.text.data !== timeText) {
+    bar.time.text.data = timeText;
+    bar.scrubber.value = String(Math.floor(time));
+    bar.scrubber.setAttribute('aria-valuetext', formatTime(time));
+  }
+  setSlotText(bar.stats, watchedStatsText(snapshot));
+}
+
 function renderInlineFrame() {
   const { view } = inlineReplay;
   if (!view || inlineReplay.riders.length === 0) return;
@@ -342,6 +438,28 @@ function renderInlineFrame() {
   const snapshot = computeInlineSnapshot();
   renderInlineDots(view, snapshot);
   renderInlineTooltip(view, snapshot);
+  renderInlineControls(view, snapshot);
+}
+
+function renderInlinePlayState() {
+  const play = inlineReplay.view?.bar.play;
+  if (!play) return;
+  const label = inlineReplay.playing ? 'Pause' : 'Play';
+  if (play.textContent !== label) play.textContent = label;
+}
+
+function renderInlineSpeed() {
+  inlineReplay.view?.bar.speedButtons.forEach((button, index) => {
+    button.setAttribute('aria-pressed', String(INLINE_SPEEDS[index] === inlineReplay.speed));
+  });
+}
+
+function renderInlineBarSetup(bar) {
+  const watched = inlineReplay.riders.find(rider => rider.position === inlineReplay.watchingPosition);
+  bar.scrubber.max = String(Math.ceil(inlineReplay.maxTime));
+  bar.stats.element.title = watched ? watched.name : '';
+  renderInlinePlayState();
+  renderInlineSpeed();
 }
 
 function renderInlineReplay() {
@@ -350,7 +468,53 @@ function renderInlineReplay() {
   const { view } = inlineReplay;
   syncInlineDots(view);
   inlineReplay.courseKm = resolveCourseKm(view.pageCourseKm, inlineReplay.riders);
+  renderInlineBarSetup(view.bar);
   renderInlineFrame();
+}
+
+function advanceInlineFrame(timestamp) {
+  const elapsedMs = inlineReplay.lastFrameAt === null ? 0 : timestamp - inlineReplay.lastFrameAt;
+  const { speed, maxTime } = inlineReplay;
+  inlineReplay.lastFrameAt = timestamp;
+  inlineReplay.time = advancePlaybackTime(inlineReplay.time, elapsedMs, speed, maxTime);
+  renderInlineFrame();
+
+  if (inlineReplay.time >= maxTime) pauseInline();
+  else inlineReplay.frameId = requestAnimationFrame(advanceInlineFrame);
+}
+
+function playInline() {
+  if (inlineReplay.playing || !inlineReplay.view || inlineReplay.maxTime <= 0) return;
+  if (inlineReplay.time >= inlineReplay.maxTime) inlineReplay.time = 0;
+  Object.assign(inlineReplay, { playing: true, lastFrameAt: null });
+  inlineReplay.frameId = requestAnimationFrame(advanceInlineFrame);
+  renderInlinePlayState();
+}
+
+function pauseInline() {
+  if (inlineReplay.frameId !== null) cancelAnimationFrame(inlineReplay.frameId);
+  Object.assign(inlineReplay, { playing: false, frameId: null, lastFrameAt: null });
+  renderInlinePlayState();
+}
+
+function toggleInlinePlayback() {
+  if (inlineReplay.playing) pauseInline();
+  else playInline();
+}
+
+function seekInline(time) {
+  inlineReplay.time = clamp(time, 0, inlineReplay.maxTime);
+  renderInlineFrame();
+}
+
+function setInlineSpeed(speed) {
+  inlineReplay.speed = speed;
+  renderInlineSpeed();
+}
+
+function openFullInlineReplay() {
+  pauseInline();
+  requestOpenReplay(inlineReplay.raceKey);
 }
 
 function applyInlineRace(race) {

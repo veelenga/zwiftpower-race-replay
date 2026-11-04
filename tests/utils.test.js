@@ -45,6 +45,8 @@ const {
   alignNearEdges,
   computeRaceStandings,
   calcStandingGap,
+  calcGapToGroupAhead,
+  advancePlaybackTime,
   calcRaceDuration,
   findWatchedRider,
   riderMarkerRole,
@@ -1455,6 +1457,44 @@ describe('calcStandingGap', () => {
     const ahead = { finished: false, currentDistance: 10.1 };
     const behind = { finished: false, currentDistance: 10 };
     expect(calcStandingGap(ahead, behind, 10)).toBe(Math.round((0.1 / DEFAULT_SPEED_KMH) * 3600));
+  });
+});
+
+describe('calcGapToGroupAhead', () => {
+  const lead = { position: 1, finished: false, currentDistance: 10.2 };
+  const tail = { position: 2, finished: false, currentDistance: 10.1 };
+  const you = { position: 3, finished: false, currentDistance: 10 };
+  const groups = [
+    { riders: [lead, tail], hasYou: false },
+    { riders: [you], hasYou: true },
+  ];
+
+  test('measures the gap to the last rider of the group ahead', () => {
+    expect(calcGapToGroupAhead(groups, you, 60)).toBe(Math.round((0.1 / DEFAULT_SPEED_KMH) * 3600));
+  });
+
+  test('returns 0 in the lead group or without a watched rider', () => {
+    expect(calcGapToGroupAhead([{ riders: [lead, you], hasYou: true }], you, 60)).toBe(0);
+    expect(calcGapToGroupAhead(groups, undefined, 60)).toBe(0);
+    expect(calcGapToGroupAhead([], you, 60)).toBe(0);
+  });
+
+  test('uses finish times once both riders finished', () => {
+    const finishedTail = { ...tail, finished: true, finishTime: 3600 };
+    const finishedYou = { ...you, finished: true, finishTime: 3609 };
+    const finishedGroups = [{ riders: [finishedTail], hasYou: false }, { riders: [finishedYou], hasYou: true }];
+    expect(calcGapToGroupAhead(finishedGroups, finishedYou, 3700)).toBe(9);
+  });
+});
+
+describe('advancePlaybackTime', () => {
+  test('advances by elapsed time scaled by speed', () => {
+    expect(advancePlaybackTime(100, 500, 10, 3600)).toBe(105);
+    expect(advancePlaybackTime(0, 1000, 1, 3600)).toBe(1);
+  });
+
+  test('stops at the end of the race', () => {
+    expect(advancePlaybackTime(3599, 1000, 30, 3600)).toBe(3600);
   });
 });
 
