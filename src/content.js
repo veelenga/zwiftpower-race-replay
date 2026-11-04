@@ -10,6 +10,8 @@ const DELAY_BETWEEN_REQUESTS_MS = 1500;
 const HIGHLIGHTED_ROW_CLASS = 'pointed';
 const FETCH_TIMEOUT_MS = 15000;
 const MAX_RETRIES = 2;
+const MAX_RATE_LIMIT_RETRIES = 3;
+const RATE_LIMIT_BASE_DELAY_MS = 2000;
 const MAX_CONSECUTIVE_FAILURES = 5;
 const PROFILE_LINK_SELECTOR = 'a[href*="profile.php?z="]';
 const ZWIFT_ID_PATTERN = /z=(\d+)/;
@@ -197,6 +199,16 @@ function getRidersFromPage() {
 }
 
 
+const AUTH_ERROR = 'Log in to ZwiftPower and try again.';
+const RATE_LIMIT_ERROR = 'ZwiftPower is rate limiting requests - try again in a few minutes.';
+const ANALYSIS_REQUEST_OPTIONS = {
+  headers: {
+    'accept': 'application/json',
+    'x-requested-with': 'XMLHttpRequest',
+  },
+  credentials: 'include',
+};
+
 async function fetchTextWithTimeout(url, options, signal, timeoutMs = FETCH_TIMEOUT_MS) {
   signal.throwIfAborted();
   const controller = new AbortController();
@@ -209,76 +221,71 @@ async function fetchTextWithTimeout(url, options, signal, timeoutMs = FETCH_TIME
 
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
-    const text = response.ok ? await response.text() : '';
-    return { ok: response.ok, status: response.status, text };
+    return {
+      status: response.status,
+      url: response.url,
+      contentType: response.headers.get('content-type') || '',
+      bodyText: response.ok ? await response.text() : '',
+    };
   } finally {
     clearTimeout(timeoutId);
     signal.removeEventListener('abort', abortWithSignal);
   }
 }
 
-/**
- * Fetch analysis data for a single rider with retry logic
- */
-async function fetchRiderAnalysis(zwiftId, eventId, signal, retries = MAX_RETRIES) {
-  const url = `${ZWIFTPOWER_API_BASE}?do=analysis&zwift_id=${zwiftId}&zwift_event_id=${eventId}`;
-
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const response = await fetchTextWithTimeout(url, {
-        headers: {
-          'accept': 'application/json',
-          'x-requested-with': 'XMLHttpRequest',
-        },
-        credentials: 'include',
-      }, signal);
-
-      if (!response.ok) {
-        console.log(`[ZP Replay] HTTP ${response.status} for rider ${zwiftId}`);
-        if (attempt < retries && response.status >= 500) {
-          await delay(DELAY_BETWEEN_REQUESTS_MS, signal);
-          continue;
-        }
-        return null;
-      }
-
-      const { text } = response;
-      if (!text || text.trim() === '') {
-        return null;
-      }
-
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        console.log(`[ZP Replay] Invalid JSON for rider ${zwiftId}`);
-        return null;
-      }
-
-      if (!data.xData || data.xData.length === 0) {
-        return null;
-      }
-
-      return {
-        distance: data.xData || [],
-        time: data.x2Data || [],
-        power: data.datasets?.['1']?.data || [],
-        heartRate: data.datasets?.['2']?.data || [],
-        elevation: data.datasets?.['0']?.data || [],
-        duration: data.x2Data?.length || 0,
-        totalDistance: data.xData?.[data.xData.length - 1] || 0,
-      };
-    } catch (error) {
-      signal.throwIfAborted();
-      console.log(`[ZP Replay] Fetch failed for rider ${zwiftId}: ${error.message}`);
-      if (attempt < retries) {
-        await delay(DELAY_BETWEEN_REQUESTS_MS, signal);
-        continue;
-      }
-      return null;
-    }
+async function requestAnalysis(url, zwiftId, signal) {
+  try {
+    const response = await fetchTextWithTimeout(url, ANALYSIS_REQUEST_OPTIONS, signal);
+    return { kind: classifyAnalysisResponse(response), bodyText: response.bodyText };
+  } catch (error) {
+    signal.throwIfAborted();
+    console.log(`[ZP Replay] Fetch failed for rider ${zwiftId}: ${error.message}`);
+    return { kind: 'server-error' };
   }
-  return null;
+}
+
+function toRiderAnalysis(data) {
+  return {
+    distance: data.xData,
+    time: data.x2Data || [],
+    power: data.datasets?.['1']?.data || [],
+    heartRate: data.datasets?.['2']?.data || [],
+    elevation: data.datasets?.['0']?.data || [],
+    duration: data.x2Data?.length || 0,
+    totalDistance: data.xData[data.xData.length - 1] || 0,
+  };
+}
+
+async function waitForRateLimit(attempt, signal) {
+  if (attempt >= MAX_RATE_LIMIT_RETRIES) throw new Error(RATE_LIMIT_ERROR);
+  await delay(RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt, signal);
+}
+
+async function fetchRiderAnalysis(zwiftId, eventId, signal) {
+  const url = `${ZWIFTPOWER_API_BASE}?do=analysis&zwift_id=${zwiftId}&zwift_event_id=${eventId}`;
+  let serverRetries = 0;
+  let rateLimitRetries = 0;
+
+  for (;;) {
+    const { kind, bodyText } = await requestAnalysis(url, zwiftId, signal);
+
+    if (kind === 'ok') return toRiderAnalysis(JSON.parse(bodyText));
+    if (kind === 'auth') throw new Error(AUTH_ERROR);
+
+    if (kind === 'rate-limited') {
+      await waitForRateLimit(rateLimitRetries++, signal);
+      continue;
+    }
+
+    if (kind === 'server-error' && serverRetries < MAX_RETRIES) {
+      serverRetries++;
+      await delay(DELAY_BETWEEN_REQUESTS_MS, signal);
+      continue;
+    }
+
+    console.log(`[ZP Replay] No analysis for rider ${zwiftId}: ${kind}`);
+    return null;
+  }
 }
 
 function delay(ms, signal) {

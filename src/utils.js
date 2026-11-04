@@ -453,6 +453,38 @@ function isSyncStatusStale(status, now, maxAgeMs) {
   return Number.isNaN(updatedAt) || now - updatedAt > maxAgeMs;
 }
 
+const AUTH_STATUSES = [401, 403];
+const RATE_LIMITED_STATUS = 429;
+const SERVER_ERROR_STATUS = 500;
+const LOGIN_URL_PATTERN = /login|\/auth\//i;
+const HTML_CONTENT_TYPE_PATTERN = /\btext\/html\b/i;
+const HTML_DOCUMENT_PATTERN = /<!doctype html|<html[\s>]/i;
+
+function parseJsonOrUndefined(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+function isHtmlBody(contentType, bodyText) {
+  return HTML_DOCUMENT_PATTERN.test(bodyText) ||
+    (HTML_CONTENT_TYPE_PATTERN.test(contentType) && bodyText.trimStart().startsWith('<'));
+}
+
+function classifyAnalysisResponse({ status, contentType = '', bodyText = '', url = '' }) {
+  if (AUTH_STATUSES.includes(status) || LOGIN_URL_PATTERN.test(url)) return 'auth';
+  if (status === RATE_LIMITED_STATUS) return 'rate-limited';
+  if (status >= SERVER_ERROR_STATUS) return 'server-error';
+  if (status < 200 || status >= 300) return 'invalid';
+  if (!bodyText.trim()) return 'empty';
+
+  const data = parseJsonOrUndefined(bodyText);
+  if (data === undefined) return isHtmlBody(contentType, bodyText) ? 'auth' : 'invalid';
+  return Array.isArray(data?.xData) && data.xData.length > 0 ? 'ok' : 'empty';
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -484,6 +516,7 @@ if (typeof module !== 'undefined' && module.exports) {
     getValueAtDistance,
     isSyncStatusForEvent,
     isSyncStatusStale,
+    classifyAnalysisResponse,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,

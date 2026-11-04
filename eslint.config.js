@@ -30,6 +30,7 @@ const sharedUtils = [
   'getValueAtDistance',
   'isSyncStatusForEvent',
   'isSyncStatusStale',
+  'classifyAnalysisResponse',
 ];
 
 module.exports = [

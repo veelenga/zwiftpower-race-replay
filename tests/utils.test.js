@@ -29,6 +29,7 @@ const {
   getValueAtDistance,
   isSyncStatusForEvent,
   isSyncStatusStale,
+  classifyAnalysisResponse,
   DEFAULT_SPEED_KMH,
 } = require('../src/utils');
 
@@ -832,5 +833,68 @@ describe('isSyncStatusStale', () => {
   test('handles missing status', () => {
     expect(isSyncStatusStale(null, now, maxAgeMs)).toBe(false);
     expect(isSyncStatusStale(undefined, now, maxAgeMs)).toBe(false);
+  });
+});
+
+describe('classifyAnalysisResponse', () => {
+  const apiUrl = 'https://zwiftpower.com/api3.php?do=analysis&zwift_id=1&zwift_event_id=2';
+  const analysisJson = JSON.stringify({ xData: [0, 0.1, 0.2], x2Data: [0, 1, 2] });
+  const loginPage = '<!DOCTYPE html><html><head><title>Login</title></head><body></body></html>';
+  const classify = fields => classifyAnalysisResponse({ status: 200, url: apiUrl, ...fields });
+
+  test('accepts JSON with distance data', () => {
+    expect(classify({ contentType: 'application/json', bodyText: analysisJson })).toBe('ok');
+  });
+
+  test('accepts JSON served with an HTML content type', () => {
+    expect(classify({ contentType: 'text/html; charset=UTF-8', bodyText: analysisJson })).toBe('ok');
+  });
+
+  test('flags unauthorized and forbidden statuses as auth', () => {
+    expect(classify({ status: 401 })).toBe('auth');
+    expect(classify({ status: 403 })).toBe('auth');
+  });
+
+  test('flags a redirect to a login page as auth', () => {
+    expect(classify({ url: 'https://zwiftpower.com/ucp.php?mode=login', bodyText: loginPage })).toBe('auth');
+    expect(classify({ url: 'https://secure.zwift.com/auth/realms/zwift/protocol/openid-connect/auth' })).toBe('auth');
+  });
+
+  test('flags an HTML document body as auth', () => {
+    expect(classify({ contentType: 'text/html', bodyText: loginPage })).toBe('auth');
+    expect(classify({ contentType: '', bodyText: `\n  ${loginPage}` })).toBe('auth');
+    expect(classify({ contentType: 'text/html', bodyText: '<div>Please log in</div>' })).toBe('auth');
+  });
+
+  test('flags 429 as rate limited', () => {
+    expect(classify({ status: 429 })).toBe('rate-limited');
+  });
+
+  test('flags 5xx statuses as server errors', () => {
+    expect(classify({ status: 500 })).toBe('server-error');
+    expect(classify({ status: 503 })).toBe('server-error');
+  });
+
+  test('treats an empty body as empty', () => {
+    expect(classify({ bodyText: '' })).toBe('empty');
+    expect(classify({ bodyText: '   \n' })).toBe('empty');
+    expect(classifyAnalysisResponse({ status: 200 })).toBe('empty');
+  });
+
+  test('treats JSON without distance data as empty', () => {
+    expect(classify({ bodyText: '{}' })).toBe('empty');
+    expect(classify({ bodyText: '{"xData":[]}' })).toBe('empty');
+    expect(classify({ bodyText: 'null' })).toBe('empty');
+    expect(classify({ bodyText: '{"xData":"1,2"}' })).toBe('empty');
+  });
+
+  test('treats a non JSON, non HTML body as invalid', () => {
+    expect(classify({ contentType: 'text/plain', bodyText: 'Something went wrong' })).toBe('invalid');
+    expect(classify({ contentType: 'text/html', bodyText: 'Something went wrong' })).toBe('invalid');
+  });
+
+  test('treats other non success statuses as invalid', () => {
+    expect(classify({ status: 404 })).toBe('invalid');
+    expect(classify({ status: 0 })).toBe('invalid');
   });
 });
