@@ -51,6 +51,7 @@ let animationFrameId = null;
 let powerChart = null;
 let hrChart = null;
 let elevationData = [];
+let distanceData = [];
 let compareRiders = []; // Array of positions of riders to compare with (max 4)
 let expandedGroups = new Set();
 let riderSearchTerm = '';
@@ -257,6 +258,7 @@ async function loadRaceData() {
 
     if (riders[0]?.elevation?.length > 0) {
       elevationData = riders[0].elevation;
+      distanceData = riders[0].distance || [];
     }
 
     populateRiderSelector();
@@ -289,30 +291,56 @@ function populateRiderSelector() {
 }
 
 // Elevation profile
+function elevationPointsInZoom() {
+  const zoomStartKm = zoomStart * totalDistanceKm;
+  const zoomEndKm = zoomEnd * totalDistanceKm;
+  const points = [];
+
+  for (let i = 0; i < elevationData.length; i++) {
+    const dist = distanceData[i] || 0;
+    if (dist >= zoomStartKm && dist <= zoomEndKm) {
+      points.push({ dist, elev: elevationData[i] });
+    }
+  }
+
+  return { zoomStartKm, zoomEndKm, points };
+}
+
+function elevationBounds(points) {
+  if (!points.length) return { minElev: 0, maxElev: 100 };
+
+  let minElev = Infinity;
+  let maxElev = -Infinity;
+  for (const { elev } of points) {
+    if (elev < minElev) minElev = elev;
+    if (elev > maxElev) maxElev = elev;
+  }
+
+  return { minElev, maxElev };
+}
+
 function initElevation() {
   const svg = elements.elevationSvg;
   const container = svg.parentElement;
   const width = container.clientWidth;
   const height = svg.clientHeight || DEFAULT_ELEVATION_SVG_HEIGHT;
 
-  if (!elevationData.length) return;
+  if (!elevationData.length || !distanceData.length) return;
 
-  const startIdx = Math.floor(zoomStart * elevationData.length);
-  const endIdx = Math.floor(zoomEnd * elevationData.length);
-  const zoomedData = elevationData.slice(startIdx, endIdx);
+  const { zoomStartKm, zoomEndKm, points } = elevationPointsInZoom();
+  const zoomRangeKm = zoomEndKm - zoomStartKm;
+  if (zoomRangeKm <= 0 || points.length === 0) return;
 
-  if (!zoomedData.length) return;
-
-  const minElev = Math.min(...zoomedData);
-  const maxElev = Math.max(...zoomedData);
+  const { minElev, maxElev } = elevationBounds(points);
   const range = maxElev - minElev || 1;
 
-  const step = Math.max(1, Math.floor(zoomedData.length / ELEVATION_PATH_MAX_POINTS));
+  const step = Math.max(1, Math.floor(points.length / ELEVATION_PATH_MAX_POINTS));
   let pathD = `M 0 ${height}`;
 
-  for (let i = 0; i < zoomedData.length; i += step) {
-    const x = (i / zoomedData.length) * width;
-    const y = height - ((zoomedData[i] - minElev) / range) * (height - ELEVATION_PATH_TOP_PADDING);
+  for (let i = 0; i < points.length; i += step) {
+    const p = points[i];
+    const x = ((p.dist - zoomStartKm) / zoomRangeKm) * width;
+    const y = height - ((p.elev - minElev) / range) * (height - ELEVATION_PATH_TOP_PADDING);
     pathD += ` L ${x} ${y}`;
   }
   pathD += ` L ${width} ${height} Z`;
@@ -682,11 +710,7 @@ function updateRiderMarkers(groups) {
   const container = elements.elevationContainer;
   const width = container.clientWidth;
 
-  const startIdx = Math.floor(zoomStart * elevationData.length);
-  const endIdx = Math.floor(zoomEnd * elevationData.length);
-  const zoomedData = elevationData.slice(startIdx, endIdx);
-  const minElev = zoomedData.length ? Math.min(...zoomedData) : 0;
-  const maxElev = zoomedData.length ? Math.max(...zoomedData) : 100;
+  const { minElev, maxElev } = elevationBounds(elevationPointsInZoom().points);
   const elevRange = maxElev - minElev || 1;
 
   container.querySelectorAll('.rider-marker, .rider-power-label').forEach(el => el.remove());
@@ -702,8 +726,8 @@ function updateRiderMarkers(groups) {
 
     visibleRiders.forEach((r) => {
       const x = ((r.progress - zoomStart) / (zoomEnd - zoomStart)) * width;
-      const elevIdx = Math.floor(r.progress * (elevationData.length - 1));
-      const elev = elevationData[elevIdx] || 0;
+
+      const elev = getValueAtDistance(distanceData, elevationData, r.currentDistance);
       const containerHeight = container.clientHeight || DEFAULT_ELEVATION_CONTAINER_HEIGHT;
       const markerRange = containerHeight - MARKER_TOP_PADDING - MARKER_BOTTOM_PADDING;
       const y = containerHeight - MARKER_BOTTOM_PADDING - ((elev - minElev) / elevRange) * markerRange;
@@ -925,8 +949,8 @@ function initEventListeners() {
     if (!isDragging) {
       const progress = zoomStart + (x / containerWidth) * (zoomEnd - zoomStart);
       const distanceKm = progress * totalDistanceKm;
-      const elevIdx = Math.floor(progress * (elevationData.length - 1));
-      const elevation = elevationData[elevIdx] || 0;
+
+      const elevation = getValueAtDistance(distanceData, elevationData, distanceKm);
 
       elements.cursorLine.style.left = `${x}px`;
       elements.cursorLine.style.display = 'block';

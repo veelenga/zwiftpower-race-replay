@@ -23,10 +23,9 @@ const {
   parseCategoryFromUrl,
   formatCategoryName,
   parsePosition,
-  SECONDS_PER_MINUTE,
+  findClosestIndex,
+  getValueAtDistance,
   DEFAULT_SPEED_KMH,
-  GROUP_GAP_THRESHOLD_SECONDS,
-  MAX_POSITION,
 } = require('../src/utils');
 
 describe('formatTime', () => {
@@ -608,5 +607,91 @@ describe('parsePosition', () => {
     expect(parsePosition('')).toBe(null);
     expect(parsePosition(null)).toBe(null);
     expect(parsePosition(undefined)).toBe(null);
+  });
+});
+
+describe('findClosestIndex', () => {
+  test('returns -1 for empty array', () => {
+    expect(findClosestIndex([], 5)).toBe(-1);
+    expect(findClosestIndex(null, 5)).toBe(-1);
+    expect(findClosestIndex(undefined, 5)).toBe(-1);
+  });
+
+  test('returns 0 for single element array', () => {
+    expect(findClosestIndex([10], 5)).toBe(0);
+    expect(findClosestIndex([10], 15)).toBe(0);
+  });
+
+  test('finds exact match', () => {
+    expect(findClosestIndex([1, 2, 3, 4, 5], 3)).toBe(2);
+    expect(findClosestIndex([0, 10, 20, 30], 20)).toBe(2);
+  });
+
+  test('finds closest when target is between values', () => {
+    expect(findClosestIndex([0, 10, 20, 30], 12)).toBe(1); // closer to 10
+    expect(findClosestIndex([0, 10, 20, 30], 18)).toBe(2); // closer to 20
+    expect(findClosestIndex([0, 10, 20, 30], 15)).toBe(1); // equidistant, prefer lower
+  });
+
+  test('handles target below range', () => {
+    expect(findClosestIndex([10, 20, 30], 5)).toBe(0);
+    expect(findClosestIndex([10, 20, 30], -100)).toBe(0);
+  });
+
+  test('handles target above range', () => {
+    expect(findClosestIndex([10, 20, 30], 35)).toBe(2);
+    expect(findClosestIndex([10, 20, 30], 1000)).toBe(2);
+  });
+
+  test('works with decimal values', () => {
+    expect(findClosestIndex([0.5, 1.5, 2.5, 3.5], 2.0)).toBe(1); // closer to 1.5
+    expect(findClosestIndex([0.5, 1.5, 2.5, 3.5], 2.3)).toBe(2); // closer to 2.5
+  });
+});
+
+describe('getValueAtDistance', () => {
+  test('returns 0 for empty arrays', () => {
+    expect(getValueAtDistance([], [], 5)).toBe(0);
+    expect(getValueAtDistance(null, [1, 2, 3], 5)).toBe(0);
+    expect(getValueAtDistance([1, 2, 3], null, 5)).toBe(0);
+  });
+
+  test('returns value at exact distance', () => {
+    const distances = [0, 10, 20, 30];
+    const elevations = [100, 150, 200, 180];
+    expect(getValueAtDistance(distances, elevations, 10)).toBe(150);
+    expect(getValueAtDistance(distances, elevations, 20)).toBe(200);
+  });
+
+  test('returns value at closest distance', () => {
+    const distances = [0, 10, 20, 30];
+    const elevations = [100, 150, 200, 180];
+    expect(getValueAtDistance(distances, elevations, 12)).toBe(150); // closer to 10
+    expect(getValueAtDistance(distances, elevations, 18)).toBe(200); // closer to 20
+  });
+
+  test('handles target outside range', () => {
+    const distances = [10, 20, 30];
+    const elevations = [100, 200, 300];
+    expect(getValueAtDistance(distances, elevations, 5)).toBe(100);  // below range
+    expect(getValueAtDistance(distances, elevations, 50)).toBe(300); // above range
+  });
+
+  test('returns 0 for falsy values in data array', () => {
+    const distances = [0, 10, 20];
+    const elevations = [100, 0, 200];
+    expect(getValueAtDistance(distances, elevations, 10)).toBe(0);
+  });
+
+  test('simulates real elevation lookup scenario', () => {
+    // Simulating a rider going faster downhill (more distance per sample)
+    const distances = [0, 0.5, 1.0, 1.8, 2.8, 4.0, 5.5]; // irregular spacing
+    const elevations = [100, 120, 150, 140, 110, 80, 60]; // elevation profile
+
+    // At distance 1.5km: |1.5-1.0|=0.5, |1.5-1.8|=0.3, so 1.8km (idx 3) is closer
+    expect(getValueAtDistance(distances, elevations, 1.5)).toBe(140);
+
+    // At distance 3.0km: |3.0-2.8|=0.2, |3.0-4.0|=1.0, so 2.8km (idx 4) is closer
+    expect(getValueAtDistance(distances, elevations, 3.0)).toBe(110);
   });
 });
