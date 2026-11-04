@@ -563,6 +563,8 @@ const replayControl = {
   races: {},
 };
 
+const replayViewers = [];
+
 const CONTROL_BUTTON_ACTIONS = {
   idle: () => startSyncFromControl({ openWhenDone: true }),
   error: () => startSyncFromControl({ openWhenDone: true }),
@@ -687,6 +689,20 @@ function refreshReplayControl() {
   if (categoryChanged || !replayControl.elements.root.isConnected) {
     renderReplayControl();
   }
+  refreshReplayViewers();
+}
+
+function registerReplayViewer(viewer) {
+  replayViewers.push(viewer);
+  if (replayControl.raceKey) viewer.refresh(replayControl.raceKey);
+}
+
+function refreshReplayViewers() {
+  replayViewers.forEach(viewer => viewer.refresh(replayControl.raceKey));
+}
+
+function updateReplayViewerRaces(races) {
+  replayViewers.forEach(viewer => viewer.racesChanged(races));
 }
 
 function updateReplayControlData(values) {
@@ -704,6 +720,7 @@ function handleReplayStorageChange(changes, areaName) {
 
   updateReplayControlData(Object.fromEntries(keys.map(key => [key, changes[key].newValue])));
   renderReplayControl();
+  if (SYNCED_RACES_KEY in changes) updateReplayViewerRaces(changes[SYNCED_RACES_KEY].newValue);
 }
 
 function watchCategorySwitches() {
@@ -726,6 +743,7 @@ async function initReplayControl() {
   replayControl.elements = createReplayControlElements();
   updateReplayControlData(await chrome.storage.local.get([SYNC_STATUS_KEY, SYNCED_RACES_KEY]));
   renderReplayControl();
+  refreshReplayViewers();
 
   chrome.storage.onChanged.addListener(handleReplayStorageChange);
   watchCategorySwitches();

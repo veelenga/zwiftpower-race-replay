@@ -38,6 +38,18 @@ const {
   sampleChartWindow,
   resolveShortcut,
   stepSpeed,
+  parseCourseDistanceKm,
+  resolveCourseKm,
+  distanceToProfileX,
+  buildCurveLookup,
+  alignNearEdges,
+  computeRaceStandings,
+  calcStandingGap,
+  calcRaceDuration,
+  findWatchedRider,
+  riderMarkerRole,
+  buildRiderStatsText,
+  KM_PER_MILE,
   DEFAULT_SPEED_KMH,
   SEEK_STEP_SECONDS,
   SEEK_SHIFT_STEP_SECONDS,
@@ -1316,5 +1328,195 @@ describe('stepSpeed', () => {
 
   test('keeps the current speed when it is not in the list', () => {
     expect(stepSpeed(speeds, 2, 1)).toBe(2);
+  });
+});
+
+describe('parseCourseDistanceKm', () => {
+  test('reads the distance label in kilometres', () => {
+    expect(parseCourseDistanceKm('Route: Watopia Distance: 28.5km Elevation: 300m')).toBe(28.5);
+    expect(parseCourseDistanceKm('Distance: 42 km')).toBe(42);
+  });
+
+  test('converts miles to kilometres', () => {
+    expect(parseCourseDistanceKm('Distance: 10mi')).toBeCloseTo(10 * KM_PER_MILE);
+  });
+
+  test('returns null when the label is missing or empty', () => {
+    expect(parseCourseDistanceKm('Elevation: 300m')).toBeNull();
+    expect(parseCourseDistanceKm('Distance: 0km')).toBeNull();
+    expect(parseCourseDistanceKm(null)).toBeNull();
+  });
+});
+
+describe('resolveCourseKm', () => {
+  test('prefers the course distance from the page', () => {
+    expect(resolveCourseKm(28.5, [{ totalDistance: 30 }])).toBe(28.5);
+  });
+
+  test('falls back to the longest rider distance', () => {
+    const riders = [{ totalDistance: 27.9 }, { distance: [0, 10, 28.4] }, { totalDistance: 28.1 }];
+    expect(resolveCourseKm(null, riders)).toBe(28.4);
+  });
+
+  test('returns 0 without page distance or riders', () => {
+    expect(resolveCourseKm(null, [])).toBe(0);
+    expect(resolveCourseKm(undefined, undefined)).toBe(0);
+  });
+});
+
+describe('distanceToProfileX', () => {
+  test('maps distance linearly between the first and last path points', () => {
+    expect(distanceToProfileX(0, 65, 1575, 28.5)).toBe(65);
+    expect(distanceToProfileX(28.5, 65, 1575, 28.5)).toBe(1575);
+    expect(distanceToProfileX(14.25, 65, 1575, 28.5)).toBe(820);
+  });
+
+  test('clamps distances outside the course', () => {
+    expect(distanceToProfileX(-1, 65, 1575, 28.5)).toBe(65);
+    expect(distanceToProfileX(30, 65, 1575, 28.5)).toBe(1575);
+  });
+
+  test('stays at the start when the course length is unknown', () => {
+    expect(distanceToProfileX(10, 65, 1575, 0)).toBe(65);
+  });
+});
+
+describe('buildCurveLookup', () => {
+  test('returns the y of the nearest sampled x', () => {
+    const curveY = buildCurveLookup([0, 10, 20, 30], [100, 80, 60, 90]);
+    expect(curveY(0)).toBe(100);
+    expect(curveY(12)).toBe(80);
+    expect(curveY(16)).toBe(60);
+    expect(curveY(29)).toBe(90);
+  });
+
+  test('clamps to the curve ends', () => {
+    const curveY = buildCurveLookup([10, 20], [50, 40]);
+    expect(curveY(-5)).toBe(50);
+    expect(curveY(100)).toBe(40);
+  });
+
+  test('sorts samples that are not in x order', () => {
+    const curveY = buildCurveLookup([20, 0, 10], [60, 100, 80]);
+    expect(curveY(1)).toBe(100);
+    expect(curveY(19)).toBe(60);
+  });
+
+  test('skips invalid samples and returns null without valid ones', () => {
+    expect(buildCurveLookup([0, NaN, 20], [5, 6, 7])(9)).toBe(5);
+    expect(buildCurveLookup([], [])).toBeNull();
+    expect(buildCurveLookup([NaN], [1])).toBeNull();
+  });
+});
+
+describe('alignNearEdges', () => {
+  test('aligns to the start or end near the edges', () => {
+    expect(alignNearEdges(70, 65, 1575, 80)).toBe('start');
+    expect(alignNearEdges(1560, 65, 1575, 80)).toBe('end');
+    expect(alignNearEdges(800, 65, 1575, 80)).toBe('middle');
+  });
+});
+
+describe('computeRaceStandings', () => {
+  const riders = [
+    { position: 1, distance: [0, 1, 2, 3], power: [200, 300, 400, 500] },
+    { position: 2, distance: [0, 1.5, 2.5, 3, 3], power: [250, 350, 450, 300, 0] },
+    { position: 3, distance: [0, 0.5, 1, 1.5, 2, 2.5], power: [150, 160, 170, 180, 190, 200] },
+  ];
+
+  test('orders riders by distance and reads current power', () => {
+    const standings = computeRaceStandings(riders, 1);
+    expect(standings.map(s => s.position)).toEqual([2, 1, 3]);
+    expect(standings[0]).toMatchObject({ currentDistance: 1.5, currentPower: 350, finished: false });
+  });
+
+  test('keeps finished riders at their last distance, ordered by finish time', () => {
+    const standings = computeRaceStandings(riders, 4);
+    expect(standings.map(s => s.position)).toEqual([1, 2, 3]);
+    expect(standings[0]).toMatchObject({ currentDistance: 3, currentPower: 0, finished: true, finishTime: 3 });
+    expect(standings[1]).toMatchObject({ finished: true, finishTime: 4 });
+    expect(standings[2]).toMatchObject({ currentDistance: 2, finished: false });
+  });
+
+  test('scales time by the sample interval', () => {
+    const standings = computeRaceStandings(riders, 2, 2);
+    expect(standings.find(s => s.position === 3).currentDistance).toBe(0.5);
+  });
+});
+
+describe('calcStandingGap', () => {
+  test('uses finish times when both riders finished', () => {
+    const ahead = { finished: true, finishTime: 3600 };
+    const behind = { finished: true, finishTime: 3614.4 };
+    expect(calcStandingGap(ahead, behind, 4000)).toBe(14);
+  });
+
+  test('estimates the gap from distance while racing', () => {
+    const ahead = { finished: false, currentDistance: 10.1 };
+    const behind = { finished: false, currentDistance: 10 };
+    expect(calcStandingGap(ahead, behind, 10)).toBe(Math.round((0.1 / DEFAULT_SPEED_KMH) * 3600));
+  });
+});
+
+describe('calcRaceDuration', () => {
+  test('returns the longest rider time', () => {
+    expect(calcRaceDuration([{ distance: [0, 1, 2] }, { distance: [0, 1, 2, 3, 4] }])).toBe(4);
+    expect(calcRaceDuration([{ distance: [0, 1, 2] }], 5)).toBe(10);
+  });
+
+  test('returns 0 without samples', () => {
+    expect(calcRaceDuration([])).toBe(0);
+    expect(calcRaceDuration([{ distance: [] }, {}])).toBe(0);
+  });
+});
+
+describe('findWatchedRider', () => {
+  test('prefers the current user', () => {
+    const riders = [{ position: 1 }, { position: 7, isCurrentUser: true }];
+    expect(findWatchedRider(riders).position).toBe(7);
+  });
+
+  test('falls back to the best placed rider', () => {
+    expect(findWatchedRider([{ position: 4 }, { position: 2 }, { position: 9 }]).position).toBe(2);
+  });
+
+  test('returns null without riders', () => {
+    expect(findWatchedRider([])).toBeNull();
+  });
+});
+
+describe('riderMarkerRole', () => {
+  const context = { watchingPosition: 5, leaderPosition: 1, groupPositions: new Set([4, 5, 6]) };
+
+  test('marks the watched rider first, then the leader, then the group', () => {
+    expect(riderMarkerRole(5, context)).toBe('you');
+    expect(riderMarkerRole(1, context)).toBe('leader');
+    expect(riderMarkerRole(4, context)).toBe('group');
+    expect(riderMarkerRole(9, context)).toBe('muted');
+  });
+
+  test('keeps the watched rider style when leading', () => {
+    expect(riderMarkerRole(1, { ...context, watchingPosition: 1 })).toBe('you');
+  });
+});
+
+describe('buildRiderStatsText', () => {
+  test('builds the full stats line', () => {
+    expect(buildRiderStatsText({ rank: 12, power: 287, leaderPower: 310, gapToLeader: 14, gapToGroup: 3 }))
+      .toBe('#12 · 287 W · leader 310 W · +14s to leader · +3s to group');
+  });
+
+  test('formats gaps over a minute', () => {
+    expect(buildRiderStatsText({ rank: 20, power: 250, gapToLeader: 75 })).toBe('#20 · 250 W · +1:15 to leader');
+  });
+
+  test('hides gaps that do not apply', () => {
+    expect(buildRiderStatsText({ rank: 1, power: 310, leaderPower: 310, gapToLeader: 0, gapToGroup: 0 }))
+      .toBe('#1 · 310 W · leader 310 W');
+    expect(buildRiderStatsText({ rank: 3, power: 0 })).toBe('#3 · 0 W');
+  });
+
+  test('returns an empty line without data', () => {
+    expect(buildRiderStatsText({})).toBe('');
   });
 });

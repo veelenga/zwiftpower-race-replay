@@ -114,3 +114,96 @@
 .zp-replay-status.zp-replay-status-error {
   color: #cf222e;
 }
+
+.zp-replay-host {
+  position: relative;
+}
+
+.zp-replay-host .zp-replay-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.zp-replay-dot {
+  outline: none;
+  pointer-events: auto;
+}
+
+.zp-replay-dot circle {
+  fill: #8c959f;
+  fill-opacity: 0.75;
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+
+.zp-replay-dot-group circle {
+  fill: #54aeff;
+  fill-opacity: 1;
+  stroke: #0969da;
+  stroke-width: 1;
+}
+
+.zp-replay-dot-leader circle {
+  fill: #ffd33d;
+  fill-opacity: 1;
+  stroke: #9a6700;
+  stroke-width: 1.5;
+}
+
+.zp-replay-dot-you circle {
+  fill: #1f6feb;
+  fill-opacity: 1;
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+.zp-replay-dot:hover circle,
+.zp-replay-dot:focus-visible circle {
+  stroke: #1f2328;
+  stroke-width: 2;
+}
+
+.zp-replay-dot-label {
+  fill: #1f2328;
+  font-size: 11px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.zp-replay-host .zp-replay-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(31, 35, 40, 0.92);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.zp-replay-host .zp-replay-tooltip[hidden] {
+  display: none;
+}
+
+.zp-replay-tooltip-name {
+  font-weight: 600;
+}
+
+.zp-replay-tooltip-stats {
+  font-variant-numeric: tabular-nums;
+}

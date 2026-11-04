@@ -39,6 +39,25 @@ const sharedUtils = [
   'sampleChartWindow',
   'resolveShortcut',
   'stepSpeed',
+  'parseCourseDistanceKm',
+  'resolveCourseKm',
+  'distanceToProfileX',
+  'buildCurveLookup',
+  'alignNearEdges',
+  'computeRaceStandings',
+  'calcStandingGap',
+  'calcRaceDuration',
+  'findWatchedRider',
+  'riderMarkerRole',
+  'buildRiderStatsText',
+];
+
+const contentScriptApi = [
+  'createControlElement',
+  'createControlButton',
+  'getExistingRaceData',
+  'registerReplayViewer',
+  'requestOpenReplay',
 ];
 
 module.exports = [
@@ -62,6 +81,18 @@ module.exports = [
     ignores: ['src/utils.js'],
     languageOptions: {
       globals: Object.fromEntries(sharedUtils.map(name => [name, 'readonly'])),
+    },
+  },
+  {
+    files: ['src/inline-replay.js'],
+    languageOptions: {
+      globals: Object.fromEntries(contentScriptApi.map(name => [name, 'readonly'])),
+    },
+  },
+  {
+    files: ['src/content.js'],
+    rules: {
+      'no-unused-vars': ['error', { varsIgnorePattern: `^(${contentScriptApi.join('|')})$` }],
     },
   },
   {

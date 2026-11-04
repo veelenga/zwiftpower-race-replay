@@ -657,6 +657,106 @@ function stepSpeed(speeds, current, step) {
   return speeds[clamp(index + step, 0, speeds.length - 1)];
 }
 
+const KM_PER_MILE = 1.609344;
+const COURSE_DISTANCE_PATTERN = /Distance:\s*(\d+(?:\.\d+)?)\s*(km|mi)\b/i;
+const STATS_SEPARATOR = ' · ';
+
+function parseCourseDistanceKm(text) {
+  const match = String(text ?? '').match(COURSE_DISTANCE_PATTERN);
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!(value > 0)) return null;
+  return match[2].toLowerCase() === 'mi' ? value * KM_PER_MILE : value;
+}
+
+function lastValue(values) {
+  return values?.length ? values[values.length - 1] : 0;
+}
+
+function resolveCourseKm(pageCourseKm, riders) {
+  if (pageCourseKm > 0) return pageCourseKm;
+  return Math.max(0, ...(riders || []).map(rider => rider.totalDistance || lastValue(rider.distance)));
+}
+
+function distanceToProfileX(distanceKm, firstX, lastX, courseKm) {
+  if (!(courseKm > 0)) return firstX;
+  return lerp(firstX, lastX, clamp(distanceKm / courseKm, 0, 1));
+}
+
+function buildCurveLookup(xs, ys) {
+  const order = Array.from(xs, (_, i) => i)
+    .filter(i => Number.isFinite(xs[i]) && Number.isFinite(ys[i]))
+    .sort((a, b) => xs[a] - xs[b]);
+  if (order.length === 0) return null;
+
+  const sortedXs = order.map(i => xs[i]);
+  const sortedYs = order.map(i => ys[i]);
+  return x => sortedYs[findClosestIndex(sortedXs, x)];
+}
+
+function alignNearEdges(x, minX, maxX, marginPx) {
+  if (x - minX < marginPx) return 'start';
+  if (maxX - x < marginPx) return 'end';
+  return 'middle';
+}
+
+function riderStandingAt(rider, time, sampleInterval) {
+  const samples = rider.distance || [];
+  const lastIndex = samples.length - 1;
+  const index = Math.min(timeToIndex(time, sampleInterval), lastIndex);
+  const finished = index === lastIndex;
+  return {
+    ...rider,
+    currentDistance: samples[index] || 0,
+    currentPower: finished ? 0 : rider.power?.[index] || 0,
+    finished,
+    finishTime: Math.max(lastIndex, 0) * sampleInterval,
+  };
+}
+
+function compareStandings(a, b) {
+  if (a.finished !== b.finished) return a.finished ? -1 : 1;
+  return a.finished ? a.finishTime - b.finishTime : b.currentDistance - a.currentDistance;
+}
+
+function computeRaceStandings(riders, time, sampleInterval = 1) {
+  return riders.map(rider => riderStandingAt(rider, time, sampleInterval)).sort(compareStandings);
+}
+
+function calcStandingGap(ahead, behind, time, sampleInterval = 1) {
+  if (ahead.finished && behind.finished) return Math.round(behind.finishTime - ahead.finishTime);
+  return calcTimeGap(ahead, behind, time, sampleInterval);
+}
+
+function calcRaceDuration(riders, sampleInterval = 1) {
+  return Math.max(0, ...riders.map(rider => Math.max((rider.distance?.length || 0) - 1, 0) * sampleInterval));
+}
+
+function findWatchedRider(riders) {
+  return riders.find(rider => rider.isCurrentUser) ||
+    riders.reduce((best, rider) => (!best || rider.position < best.position ? rider : best), null);
+}
+
+function riderMarkerRole(position, { watchingPosition, leaderPosition, groupPositions }) {
+  if (position === watchingPosition) return 'you';
+  if (position === leaderPosition) return 'leader';
+  return groupPositions.has(position) ? 'group' : 'muted';
+}
+
+function formatGapTo(seconds, target) {
+  return seconds > 0 ? `${formatTimeGap(seconds)} to ${target}` : null;
+}
+
+function buildRiderStatsText({ rank, power, leaderPower, gapToLeader, gapToGroup }) {
+  return [
+    rank > 0 ? `#${rank}` : null,
+    Number.isFinite(power) ? `${power} W` : null,
+    Number.isFinite(leaderPower) ? `leader ${leaderPower} W` : null,
+    formatGapTo(gapToLeader, 'leader'),
+    formatGapTo(gapToGroup, 'group'),
+  ].filter(Boolean).join(STATS_SEPARATOR);
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -697,6 +797,17 @@ if (typeof module !== 'undefined' && module.exports) {
     sampleChartWindow,
     resolveShortcut,
     stepSpeed,
+    parseCourseDistanceKm,
+    resolveCourseKm,
+    distanceToProfileX,
+    buildCurveLookup,
+    alignNearEdges,
+    computeRaceStandings,
+    calcStandingGap,
+    calcRaceDuration,
+    findWatchedRider,
+    riderMarkerRole,
+    buildRiderStatsText,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,
@@ -711,5 +822,6 @@ if (typeof module !== 'undefined' && module.exports) {
     EVENT_ID_PATTERN,
     SEEK_STEP_SECONDS,
     SEEK_SHIFT_STEP_SECONDS,
+    KM_PER_MILE,
   };
 }
