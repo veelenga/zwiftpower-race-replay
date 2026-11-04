@@ -380,6 +380,54 @@ function parsePosition(text, maxPosition = MAX_POSITION) {
   return pos > 0 && pos <= maxPosition ? pos : null;
 }
 
+/**
+ * Find the index of the closest value in a sorted array using binary search
+ * @param {Array<number>} sortedArray - Sorted array of numbers (ascending)
+ * @param {number} target - Target value to find closest match for
+ * @returns {number} Index of the closest value, or -1 if array is empty
+ */
+function findClosestIndex(sortedArray, target) {
+  if (!sortedArray || sortedArray.length === 0) return -1;
+  if (sortedArray.length === 1) return 0;
+
+  let left = 0;
+  let right = sortedArray.length - 1;
+
+  while (left < right) {
+    const mid = Math.floor((left + right) / 2);
+    if (sortedArray[mid] < target) {
+      left = mid + 1;
+    } else {
+      right = mid;
+    }
+  }
+
+  if (left === 0) return 0;
+  if (left === sortedArray.length) return sortedArray.length - 1;
+
+  const diffLeft = Math.abs(sortedArray[left] - target);
+  const diffPrev = Math.abs(sortedArray[left - 1] - target);
+
+  return diffPrev <= diffLeft ? left - 1 : left;
+}
+
+/**
+ * Get a value from a data array at a specific distance position
+ * Uses the distance array to find the correct index, then returns the corresponding data value
+ * @param {Array<number>} distanceArray - Array of distance values (sorted ascending)
+ * @param {Array<number>} dataArray - Array of data values (same length as distanceArray)
+ * @param {number} targetDistance - Target distance to look up
+ * @returns {number} Value from dataArray at the closest distance, or 0 if not found
+ */
+function getValueAtDistance(distanceArray, dataArray, targetDistance) {
+  if (!distanceArray || !dataArray || distanceArray.length === 0) return 0;
+
+  const idx = findClosestIndex(distanceArray, targetDistance);
+  if (idx < 0 || idx >= dataArray.length) return 0;
+
+  return dataArray[idx] || 0;
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -405,6 +453,8 @@ if (typeof module !== 'undefined' && module.exports) {
     parseCategoryFromUrl,
     formatCategoryName,
     parsePosition,
+    findClosestIndex,
+    getValueAtDistance,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,
