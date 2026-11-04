@@ -34,6 +34,7 @@
     {
       "matches": ["https://zwiftpower.com/*"],
       "js": ["src/utils.js", "src/content.js"],
+      "css": ["src/content.css"],
       "run_at": "document_idle"
     }
   ],

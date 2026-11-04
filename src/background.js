@@ -3,8 +3,22 @@
  * Handles message relay between popup and content script
  */
 
+function openReplayTab(eventId, tab) {
+  const url = chrome.runtime.getURL(`src/replay.html?eventId=${encodeURIComponent(eventId)}`);
+  return chrome.tabs.create({ url, index: tab.index + 1, openerTabId: tab.id });
+}
+
 // Relay messages to content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'openReplay' && sender.tab && typeof message.eventId === 'string') {
+    openReplayTab(message.eventId, sender.tab)
+      .then(() => sendResponse({ success: true }))
+      .catch((error) => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+
   if (message.action === 'startSync' && message.tabId) {
     chrome.tabs.sendMessage(message.tabId, { action: 'startSync' })
       .then(sendResponse)

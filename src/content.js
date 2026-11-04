@@ -20,6 +20,15 @@ const PAGE_INFO_TIMEOUT_MS = 3000;
 const TABLE_POLL_INTERVAL_MS = 200;
 const MAX_VALID_POSITION = 200;
 const MAX_SYNCED_RACES = 15;
+const SYNC_STATUS_KEY = 'syncStatus';
+const SYNCED_RACES_KEY = 'syncedRaces';
+const SYNC_STATUS_MAX_AGE_MS = 2 * 60 * 1000;
+const CATEGORY_FILTER_SELECTOR = 'button[data-value][class*="event_filter_id"]';
+const CATEGORY_BUTTON_SELECTOR = 'button[data-value]';
+const CONTROL_REFRESH_DELAY_MS = 100;
+const CONTROL_MOUNT_THROTTLE_MS = 250;
+const CONTROL_STANDALONE_CLASS = 'zp-replay-standalone';
+const CONTROL_LINK_LABELS = { cancel: 'Cancel', resync: 'Re-sync' };
 
 // Sync state
 let currentSyncAbortController = null;
@@ -303,17 +312,17 @@ function delay(ms, signal) {
   });
 }
 
-async function updateSyncStatus(eventId, fields) {
-  const syncStatus = { ...fields, eventId, updatedAt: new Date().toISOString() };
-  await chrome.storage.local.set({ syncStatus });
+async function updateSyncStatus({ eventId, raceKey }, fields) {
+  const syncStatus = { ...fields, eventId, raceKey, updatedAt: new Date().toISOString() };
+  await chrome.storage.local.set({ [SYNC_STATUS_KEY]: syncStatus });
 }
 
 /**
  * Get existing race data from storage
  */
 async function getExistingRaceData(eventId) {
-  const existing = await chrome.storage.local.get('syncedRaces');
-  const races = existing.syncedRaces || {};
+  const existing = await chrome.storage.local.get(SYNCED_RACES_KEY);
+  const races = existing[SYNCED_RACES_KEY] || {};
   return races[eventId] || null;
 }
 
@@ -321,8 +330,8 @@ async function getExistingRaceData(eventId) {
  * Save race data to storage, enforcing max limit
  */
 async function saveRaceData(raceData) {
-  const existing = await chrome.storage.local.get('syncedRaces');
-  const races = existing.syncedRaces || {};
+  const existing = await chrome.storage.local.get(SYNCED_RACES_KEY);
+  const races = existing[SYNCED_RACES_KEY] || {};
 
   // If adding a new race and at limit, remove oldest
   if (!races[raceData.eventId]) {
@@ -339,7 +348,7 @@ async function saveRaceData(raceData) {
   }
 
   races[raceData.eventId] = raceData;
-  await chrome.storage.local.set({ syncedRaces: races });
+  await chrome.storage.local.set({ [SYNCED_RACES_KEY]: races });
 }
 
 function cancelSync() {
@@ -370,15 +379,15 @@ async function prepareSyncContext() {
 
   const ridersToSync = selectRidersToSync(allRiders, MAX_RIDERS_TO_SYNC);
   const fullEventName = categoryName ? `${eventName} - ${categoryName}` : eventName;
-  const fullEventId = categoryId ? `${eventId}_${categoryId}` : eventId;
+  const raceKey = buildRaceKey(eventId, categoryId);
 
-  const existingRace = await getExistingRaceData(fullEventId);
+  const existingRace = await getExistingRaceData(raceKey);
   const existingRiderIds = new Set(existingRace?.riders?.map(r => r.zwiftId) || []);
   const newRidersToSync = ridersToSync.filter(r => !existingRiderIds.has(r.zwiftId));
 
   return {
     eventId,
-    fullEventId,
+    raceKey,
     fullEventName,
     allRiders,
     ridersToSync,
@@ -402,7 +411,7 @@ function createRiderWithAnalysis(rider, analysis) {
 
 function createRaceResult(ctx, riderData, errors, syncProgress, syncInProgress) {
   return {
-    eventId: ctx.fullEventId,
+    eventId: ctx.raceKey,
     eventName: ctx.fullEventName,
     riders: riderData,
     errors,
@@ -429,7 +438,7 @@ async function syncRiders(ctx, riderData, errors, signal) {
 
     const rider = ctx.newRidersToSync[i];
 
-    await updateSyncStatus(ctx.eventId, {
+    await updateSyncStatus(ctx, {
       status: 'syncing',
       eventName: ctx.fullEventName,
       current: i + 1,
@@ -470,7 +479,7 @@ async function saveFinishedRace(ctx, riderData, errors) {
 
 async function finishCancelledSync(ctx, riderData, errors) {
   const raceResult = await saveFinishedRace(ctx, riderData, errors);
-  await updateSyncStatus(ctx.eventId, { status: 'cancelled', eventName: ctx.fullEventName });
+  await updateSyncStatus(ctx, { status: 'cancelled', eventName: ctx.fullEventName });
   return raceResult;
 }
 
@@ -478,7 +487,7 @@ async function syncRaceData(signal) {
   const ctx = await prepareSyncContext();
 
   if (ctx.newRidersToSync.length === 0) {
-    await updateSyncStatus(ctx.eventId, {
+    await updateSyncStatus(ctx, {
       status: 'complete',
       eventName: ctx.fullEventName,
       successfulSyncs: ctx.existingRace.riders.length,
@@ -511,7 +520,7 @@ async function syncRaceData(signal) {
 
   const raceResult = await saveFinishedRace(ctx, riderData, errors);
 
-  await updateSyncStatus(ctx.eventId, {
+  await updateSyncStatus(ctx, {
     status: 'complete',
     eventName: ctx.fullEventName,
     successfulSyncs: riderData.length,
@@ -522,18 +531,205 @@ async function syncRaceData(signal) {
   return raceResult;
 }
 
+function finishSync(signal) {
+  if (currentSyncAbortController?.signal === signal) {
+    currentSyncAbortController = null;
+  }
+}
+
 async function runSync() {
   const signal = beginSync();
   const eventId = getEventIdFromUrl();
+  const target = { eventId, raceKey: buildRaceKey(eventId, detectActiveCategoryId()) };
 
   try {
-    await updateSyncStatus(eventId, { status: 'starting' });
+    await updateSyncStatus(target, { status: 'starting' });
     const data = await syncRaceData(signal);
-    return { success: true, data };
+    return { success: true, data, cancelled: signal.aborted };
   } catch (error) {
-    await updateSyncStatus(eventId, { status: 'error', error: error.message });
+    await updateSyncStatus(target, { status: 'error', error: error.message });
     return { success: false, error: error.message };
+  } finally {
+    finishSync(signal);
   }
+}
+
+const replayControl = {
+  eventId: null,
+  elements: null,
+  raceKey: null,
+  state: null,
+  syncStatus: null,
+  races: {},
+};
+
+const CONTROL_BUTTON_ACTIONS = {
+  idle: () => startSyncFromControl({ openWhenDone: true }),
+  error: () => startSyncFromControl({ openWhenDone: true }),
+  synced: () => requestOpenReplay(replayControl.raceKey),
+};
+
+const CONTROL_LINK_ACTIONS = {
+  cancel: () => cancelSyncFromControl(),
+  resync: () => startSyncFromControl({ openWhenDone: false }),
+};
+
+function requestOpenReplay(raceKey) {
+  chrome.runtime.sendMessage({ action: 'openReplay', eventId: raceKey })
+    .catch(error => console.log(`[ZP Replay] Could not open replay: ${error.message}`));
+}
+
+async function startSyncFromControl({ openWhenDone }) {
+  replayControl.elements.button.disabled = true;
+  const result = await runSync();
+  if (openWhenDone && result.success && !result.cancelled) {
+    requestOpenReplay(result.data.eventId);
+  }
+}
+
+function cancelSyncFromControl() {
+  if (currentSyncAbortController) {
+    cancelSync();
+    return;
+  }
+  updateSyncStatus({ eventId: replayControl.eventId, raceKey: replayControl.raceKey }, { status: 'cancelled' });
+}
+
+function createControlElement(tagName, className) {
+  const element = document.createElement(tagName);
+  element.className = className;
+  return element;
+}
+
+function createControlButton(className, onClick) {
+  const button = createControlElement('button', className);
+  button.type = 'button';
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function createReplayControlElements() {
+  const root = createControlElement('div', 'zp-replay');
+  const actions = createControlElement('div', 'zp-replay-actions');
+  const buttonWrap = createControlElement('span', 'zp-replay-button-wrap');
+  const progress = createControlElement('span', 'zp-replay-progress');
+  const progressFill = createControlElement('span', 'zp-replay-progress-fill');
+  const button = createControlButton('zp-replay-button', () => CONTROL_BUTTON_ACTIONS[replayControl.state?.kind]?.());
+  const link = createControlButton('zp-replay-link', () => CONTROL_LINK_ACTIONS[replayControl.state?.link]?.());
+  const status = createControlElement('div', 'zp-replay-status');
+
+  progress.append(progressFill);
+  buttonWrap.append(button, progress);
+  actions.append(buttonWrap, link);
+  root.append(actions, status);
+  return { root, button, progress, progressFill, link, status };
+}
+
+function applyReplayControlState(elements, state) {
+  elements.button.textContent = state.buttonLabel;
+  elements.button.disabled = state.kind === 'syncing';
+  elements.link.textContent = CONTROL_LINK_LABELS[state.link] || '';
+  elements.link.hidden = !state.link;
+  elements.progress.hidden = state.progress === null;
+  elements.progressFill.style.width = `${state.progress ?? 0}%`;
+  elements.status.textContent = state.statusText;
+  elements.status.title = state.statusText;
+  elements.status.classList.toggle('zp-replay-status-error', state.isError);
+}
+
+function findCategoryFilterAnchor() {
+  const buttons = document.querySelectorAll(CATEGORY_FILTER_SELECTOR);
+  const lastButton = buttons[buttons.length - 1];
+  return lastButton?.closest('.btn-group') || lastButton || null;
+}
+
+function findReplayControlPlacement() {
+  const filterAnchor = findCategoryFilterAnchor();
+  if (filterAnchor) return { standalone: false, mount: root => filterAnchor.after(root) };
+
+  const { table } = getActiveCategory();
+  const tableAnchor = table?.closest('.dataTables_wrapper') || table;
+  return tableAnchor ? { standalone: true, mount: root => tableAnchor.before(root) } : null;
+}
+
+function ensureReplayControlMounted() {
+  const { root } = replayControl.elements;
+  if (root.isConnected) return;
+
+  const placement = findReplayControlPlacement();
+  if (!placement) return;
+
+  root.classList.toggle(CONTROL_STANDALONE_CLASS, placement.standalone);
+  placement.mount(root);
+}
+
+function getActiveRaceKey() {
+  return buildRaceKey(replayControl.eventId, detectActiveCategoryId());
+}
+
+function renderReplayControl() {
+  const raceKey = getActiveRaceKey();
+  const state = buildReplayControlState({
+    syncStatus: replayControl.syncStatus,
+    raceSummary: replayControl.races[raceKey],
+    raceKey,
+    now: Date.now(),
+    maxAgeMs: SYNC_STATUS_MAX_AGE_MS,
+  });
+
+  Object.assign(replayControl, { raceKey, state });
+  applyReplayControlState(replayControl.elements, state);
+  ensureReplayControlMounted();
+}
+
+function refreshReplayControl() {
+  const categoryChanged = getActiveRaceKey() !== replayControl.raceKey;
+  if (categoryChanged || !replayControl.elements.root.isConnected) {
+    renderReplayControl();
+  }
+}
+
+function updateReplayControlData(values) {
+  if (SYNC_STATUS_KEY in values) {
+    replayControl.syncStatus = values[SYNC_STATUS_KEY] ?? null;
+  }
+  if (SYNCED_RACES_KEY in values) {
+    replayControl.races = summarizeSyncedRaces(values[SYNCED_RACES_KEY]);
+  }
+}
+
+function handleReplayStorageChange(changes, areaName) {
+  const keys = [SYNC_STATUS_KEY, SYNCED_RACES_KEY].filter(key => key in changes);
+  if (areaName !== 'local' || keys.length === 0) return;
+
+  updateReplayControlData(Object.fromEntries(keys.map(key => [key, changes[key].newValue])));
+  renderReplayControl();
+}
+
+function watchCategorySwitches() {
+  const refreshSoon = debounce(refreshReplayControl, CONTROL_REFRESH_DELAY_MS);
+  document.addEventListener('click', (event) => {
+    if (event.target.closest?.(CATEGORY_BUTTON_SELECTOR)) refreshSoon();
+  });
+  window.addEventListener('hashchange', refreshSoon);
+}
+
+function watchPageChanges() {
+  const refresh = throttle(refreshReplayControl, CONTROL_MOUNT_THROTTLE_MS);
+  new MutationObserver(() => refresh()).observe(document.body, { childList: true, subtree: true });
+}
+
+async function initReplayControl() {
+  replayControl.eventId = getEventIdFromUrl();
+  if (!replayControl.eventId) return;
+
+  replayControl.elements = createReplayControlElements();
+  updateReplayControlData(await chrome.storage.local.get([SYNC_STATUS_KEY, SYNCED_RACES_KEY]));
+  renderReplayControl();
+
+  chrome.storage.onChanged.addListener(handleReplayStorageChange);
+  watchCategorySwitches();
+  watchPageChanges();
 }
 
 // Listen for messages
@@ -578,3 +774,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return false;
 });
+
+initReplayControl();
