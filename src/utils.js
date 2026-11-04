@@ -441,6 +441,18 @@ function getValueAtDistance(distanceArray, dataArray, targetDistance) {
   return dataArray[idx] || 0;
 }
 
+const ACTIVE_SYNC_STATUSES = ['starting', 'syncing'];
+
+function isSyncStatusForEvent(status, eventId) {
+  return Boolean(status && eventId) && status.eventId === eventId;
+}
+
+function isSyncStatusStale(status, now, maxAgeMs) {
+  if (!ACTIVE_SYNC_STATUSES.includes(status?.status)) return false;
+  const updatedAt = Date.parse(status.updatedAt);
+  return Number.isNaN(updatedAt) || now - updatedAt > maxAgeMs;
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -470,6 +482,8 @@ if (typeof module !== 'undefined' && module.exports) {
     parsePosition,
     findClosestIndex,
     getValueAtDistance,
+    isSyncStatusForEvent,
+    isSyncStatusStale,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,

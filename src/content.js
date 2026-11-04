@@ -197,59 +197,52 @@ function getRidersFromPage() {
 }
 
 
-/**
- * Fetch with timeout
- */
-async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
+async function fetchTextWithTimeout(url, options, signal, timeoutMs = FETCH_TIMEOUT_MS) {
+  signal.throwIfAborted();
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const abortWithSignal = () => controller.abort(signal.reason);
+  const timeoutId = setTimeout(
+    () => controller.abort(new Error(`Request timeout after ${timeoutMs}ms`)),
+    timeoutMs
+  );
+  signal.addEventListener('abort', abortWithSignal, { once: true });
 
   try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const text = response.ok ? await response.text() : '';
+    return { ok: response.ok, status: response.status, text };
+  } finally {
     clearTimeout(timeoutId);
-    return response;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error(`Request timeout after ${timeoutMs}ms`, { cause: error });
-    }
-    throw error;
+    signal.removeEventListener('abort', abortWithSignal);
   }
 }
 
 /**
  * Fetch analysis data for a single rider with retry logic
  */
-async function fetchRiderAnalysis(zwiftId, eventId, retries = MAX_RETRIES) {
+async function fetchRiderAnalysis(zwiftId, eventId, signal, retries = MAX_RETRIES) {
   const url = `${ZWIFTPOWER_API_BASE}?do=analysis&zwift_id=${zwiftId}&zwift_event_id=${eventId}`;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      if (currentSyncAbortController?.signal.aborted) {
-        return null;
-      }
-
-      const response = await fetchWithTimeout(url, {
+      const response = await fetchTextWithTimeout(url, {
         headers: {
           'accept': 'application/json',
           'x-requested-with': 'XMLHttpRequest',
         },
         credentials: 'include',
-      });
+      }, signal);
 
       if (!response.ok) {
         console.log(`[ZP Replay] HTTP ${response.status} for rider ${zwiftId}`);
         if (attempt < retries && response.status >= 500) {
-          await delay(DELAY_BETWEEN_REQUESTS_MS);
+          await delay(DELAY_BETWEEN_REQUESTS_MS, signal);
           continue;
         }
         return null;
       }
 
-      const text = await response.text();
+      const { text } = response;
       if (!text || text.trim() === '') {
         return null;
       }
@@ -276,9 +269,10 @@ async function fetchRiderAnalysis(zwiftId, eventId, retries = MAX_RETRIES) {
         totalDistance: data.xData?.[data.xData.length - 1] || 0,
       };
     } catch (error) {
+      signal.throwIfAborted();
       console.log(`[ZP Replay] Fetch failed for rider ${zwiftId}: ${error.message}`);
       if (attempt < retries) {
-        await delay(DELAY_BETWEEN_REQUESTS_MS);
+        await delay(DELAY_BETWEEN_REQUESTS_MS, signal);
         continue;
       }
       return null;
@@ -287,18 +281,24 @@ async function fetchRiderAnalysis(zwiftId, eventId, retries = MAX_RETRIES) {
   return null;
 }
 
-/**
- * Delay helper
- */
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function delay(ms, signal) {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const onAbort = () => {
+      clearTimeout(timeoutId);
+      reject(signal.reason);
+    };
+    const timeoutId = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
-/**
- * Update sync status in storage
- */
-async function updateSyncStatus(status) {
-  await chrome.storage.local.set({ syncStatus: status });
+async function updateSyncStatus(eventId, fields) {
+  const syncStatus = { ...fields, eventId, updatedAt: new Date().toISOString() };
+  await chrome.storage.local.set({ syncStatus });
 }
 
 /**
@@ -335,14 +335,15 @@ async function saveRaceData(raceData) {
   await chrome.storage.local.set({ syncedRaces: races });
 }
 
-/**
- * Cancel any ongoing sync
- */
 function cancelSync() {
-  if (currentSyncAbortController) {
-    currentSyncAbortController.abort();
-    currentSyncAbortController = null;
-  }
+  currentSyncAbortController?.abort();
+  currentSyncAbortController = null;
+}
+
+function beginSync() {
+  cancelSync();
+  currentSyncAbortController = new AbortController();
+  return currentSyncAbortController.signal;
 }
 
 async function prepareSyncContext() {
@@ -412,18 +413,17 @@ function createRaceResult(ctx, riderData, errors, syncProgress, syncInProgress) 
 
 const NOT_READY_ERROR = 'Race analysis not ready yet. ZwiftPower may still be processing - try again later.';
 
-async function syncRiders(ctx, riderData, errors) {
+async function syncRiders(ctx, riderData, errors, signal) {
   const total = ctx.newRidersToSync.length;
   let consecutiveFailures = 0;
 
   for (let i = 0; i < total; i++) {
-    if (currentSyncAbortController?.signal.aborted) return;
+    signal.throwIfAborted();
 
     const rider = ctx.newRidersToSync[i];
 
-    await updateSyncStatus({
+    await updateSyncStatus(ctx.eventId, {
       status: 'syncing',
-      eventId: ctx.fullEventId,
       eventName: ctx.fullEventName,
       current: i + 1,
       total,
@@ -432,9 +432,9 @@ async function syncRiders(ctx, riderData, errors) {
       consecutiveFailures,
     });
 
-    if (i > 0) await delay(DELAY_BETWEEN_REQUESTS_MS);
+    if (i > 0) await delay(DELAY_BETWEEN_REQUESTS_MS, signal);
 
-    const analysis = await fetchRiderAnalysis(rider.zwiftId, ctx.eventId);
+    const analysis = await fetchRiderAnalysis(rider.zwiftId, ctx.eventId, signal);
 
     if (!analysis) {
       consecutiveFailures++;
@@ -453,16 +453,21 @@ async function syncRiders(ctx, riderData, errors) {
   }
 }
 
-async function syncRaceData() {
-  cancelSync();
-  currentSyncAbortController = new AbortController();
+async function finishCancelledSync(ctx, riderData, errors) {
+  const raceResult = createRaceResult(ctx, riderData, errors, null, false);
+  if (riderData.length > 0) {
+    await saveRaceData(raceResult);
+  }
+  await updateSyncStatus(ctx.eventId, { status: 'cancelled', eventName: ctx.fullEventName });
+  return raceResult;
+}
 
+async function syncRaceData(signal) {
   const ctx = await prepareSyncContext();
 
   if (ctx.newRidersToSync.length === 0) {
-    await updateSyncStatus({
+    await updateSyncStatus(ctx.eventId, {
       status: 'complete',
-      eventId: ctx.fullEventId,
       eventName: ctx.fullEventName,
       successfulSyncs: ctx.existingRace.riders.length,
       totalRiders: ctx.allRiders.length,
@@ -475,7 +480,15 @@ async function syncRaceData() {
   const riderData = [...(ctx.existingRace?.riders || [])];
   const errors = [];
 
-  await syncRiders(ctx, riderData, errors);
+  try {
+    await syncRiders(ctx, riderData, errors, signal);
+  } catch (error) {
+    if (!signal.aborted) throw error;
+  }
+
+  if (signal.aborted) {
+    return finishCancelledSync(ctx, riderData, errors);
+  }
 
   if (riderData.length === 0) {
     throw new Error(NOT_READY_ERROR);
@@ -484,9 +497,8 @@ async function syncRaceData() {
   const raceResult = createRaceResult(ctx, riderData, errors, null, false);
   await saveRaceData(raceResult);
 
-  await updateSyncStatus({
+  await updateSyncStatus(ctx.eventId, {
     status: 'complete',
-    eventId: ctx.fullEventId,
     eventName: ctx.fullEventName,
     successfulSyncs: riderData.length,
     totalRiders: ctx.allRiders.length,
@@ -494,6 +506,20 @@ async function syncRaceData() {
   });
 
   return raceResult;
+}
+
+async function runSync() {
+  const signal = beginSync();
+  const eventId = getEventIdFromUrl();
+
+  try {
+    await updateSyncStatus(eventId, { status: 'starting' });
+    const data = await syncRaceData(signal);
+    return { success: true, data };
+  } catch (error) {
+    await updateSyncStatus(eventId, { status: 'error', error: error.message });
+    return { success: false, error: error.message };
+  }
 }
 
 // Listen for messages
@@ -532,16 +558,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'startSync') {
-    (async () => {
-      try {
-        await updateSyncStatus({ status: 'starting' });
-        const result = await syncRaceData();
-        sendResponse({ success: true, data: result });
-      } catch (error) {
-        await updateSyncStatus({ status: 'error', error: error.message });
-        sendResponse({ success: false, error: error.message });
-      }
-    })();
+    runSync().then(sendResponse);
     return true;
   }
 

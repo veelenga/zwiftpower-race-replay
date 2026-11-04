@@ -28,6 +28,8 @@ const sharedUtils = [
   'parsePosition',
   'findClosestIndex',
   'getValueAtDistance',
+  'isSyncStatusForEvent',
+  'isSyncStatusStale',
 ];
 
 module.exports = [

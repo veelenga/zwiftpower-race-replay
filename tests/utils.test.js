@@ -27,6 +27,8 @@ const {
   parsePosition,
   findClosestIndex,
   getValueAtDistance,
+  isSyncStatusForEvent,
+  isSyncStatusStale,
   DEFAULT_SPEED_KMH,
 } = require('../src/utils');
 
@@ -780,5 +782,55 @@ describe('getValueAtDistance', () => {
 
     // At distance 3.0km: |3.0-2.8|=0.2, |3.0-4.0|=1.0, so 2.8km (idx 4) is closer
     expect(getValueAtDistance(distances, elevations, 3.0)).toBe(110);
+  });
+});
+
+describe('isSyncStatusForEvent', () => {
+  test('matches status with the same event ID', () => {
+    expect(isSyncStatusForEvent({ status: 'syncing', eventId: '123' }, '123')).toBe(true);
+  });
+
+  test('rejects status for another event', () => {
+    expect(isSyncStatusForEvent({ status: 'syncing', eventId: '456' }, '123')).toBe(false);
+  });
+
+  test('rejects missing status or event ID', () => {
+    expect(isSyncStatusForEvent(null, '123')).toBe(false);
+    expect(isSyncStatusForEvent(undefined, '123')).toBe(false);
+    expect(isSyncStatusForEvent({ status: 'syncing' }, null)).toBe(false);
+    expect(isSyncStatusForEvent({ status: 'syncing' }, undefined)).toBe(false);
+  });
+});
+
+describe('isSyncStatusStale', () => {
+  const now = Date.parse('2026-01-01T12:00:00.000Z');
+  const maxAgeMs = 2 * 60 * 1000;
+  const updatedAgo = ms => new Date(now - ms).toISOString();
+
+  test('keeps a recently updated active status', () => {
+    expect(isSyncStatusStale({ status: 'syncing', updatedAt: updatedAgo(30000) }, now, maxAgeMs)).toBe(false);
+    expect(isSyncStatusStale({ status: 'starting', updatedAt: updatedAgo(maxAgeMs) }, now, maxAgeMs)).toBe(false);
+  });
+
+  test('flags an active status older than max age', () => {
+    expect(isSyncStatusStale({ status: 'syncing', updatedAt: updatedAgo(maxAgeMs + 1) }, now, maxAgeMs)).toBe(true);
+    expect(isSyncStatusStale({ status: 'starting', updatedAt: updatedAgo(10 * 60 * 1000) }, now, maxAgeMs)).toBe(true);
+  });
+
+  test('flags an active status without a valid timestamp', () => {
+    expect(isSyncStatusStale({ status: 'syncing' }, now, maxAgeMs)).toBe(true);
+    expect(isSyncStatusStale({ status: 'starting', updatedAt: 'not a date' }, now, maxAgeMs)).toBe(true);
+  });
+
+  test('never flags finished statuses', () => {
+    const updatedAt = updatedAgo(60 * 60 * 1000);
+    expect(isSyncStatusStale({ status: 'complete', updatedAt }, now, maxAgeMs)).toBe(false);
+    expect(isSyncStatusStale({ status: 'error', updatedAt }, now, maxAgeMs)).toBe(false);
+    expect(isSyncStatusStale({ status: 'cancelled', updatedAt }, now, maxAgeMs)).toBe(false);
+  });
+
+  test('handles missing status', () => {
+    expect(isSyncStatusStale(null, now, maxAgeMs)).toBe(false);
+    expect(isSyncStatusStale(undefined, now, maxAgeMs)).toBe(false);
   });
 });
