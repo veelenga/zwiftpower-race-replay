@@ -810,9 +810,10 @@ describe('isSyncStatusStale', () => {
   const maxAgeMs = 2 * 60 * 1000;
   const updatedAgo = ms => new Date(now - ms).toISOString();
 
-  test('keeps a recently updated active status', () => {
+  test('keeps a recently updated status', () => {
     expect(isSyncStatusStale({ status: 'syncing', updatedAt: updatedAgo(30000) }, now, maxAgeMs)).toBe(false);
     expect(isSyncStatusStale({ status: 'starting', updatedAt: updatedAgo(maxAgeMs) }, now, maxAgeMs)).toBe(false);
+    expect(isSyncStatusStale({ status: 'error', updatedAt: updatedAgo(30000) }, now, maxAgeMs)).toBe(false);
   });
 
   test('flags an active status older than max age', () => {
@@ -820,16 +821,17 @@ describe('isSyncStatusStale', () => {
     expect(isSyncStatusStale({ status: 'starting', updatedAt: updatedAgo(10 * 60 * 1000) }, now, maxAgeMs)).toBe(true);
   });
 
-  test('flags an active status without a valid timestamp', () => {
-    expect(isSyncStatusStale({ status: 'syncing' }, now, maxAgeMs)).toBe(true);
-    expect(isSyncStatusStale({ status: 'starting', updatedAt: 'not a date' }, now, maxAgeMs)).toBe(true);
+  test('flags a finished status older than max age', () => {
+    const updatedAt = updatedAgo(60 * 60 * 1000);
+    expect(isSyncStatusStale({ status: 'error', updatedAt }, now, maxAgeMs)).toBe(true);
+    expect(isSyncStatusStale({ status: 'complete', updatedAt }, now, maxAgeMs)).toBe(true);
+    expect(isSyncStatusStale({ status: 'cancelled', updatedAt }, now, maxAgeMs)).toBe(true);
   });
 
-  test('never flags finished statuses', () => {
-    const updatedAt = updatedAgo(60 * 60 * 1000);
-    expect(isSyncStatusStale({ status: 'complete', updatedAt }, now, maxAgeMs)).toBe(false);
-    expect(isSyncStatusStale({ status: 'error', updatedAt }, now, maxAgeMs)).toBe(false);
-    expect(isSyncStatusStale({ status: 'cancelled', updatedAt }, now, maxAgeMs)).toBe(false);
+  test('flags a status without a valid timestamp', () => {
+    expect(isSyncStatusStale({ status: 'syncing' }, now, maxAgeMs)).toBe(true);
+    expect(isSyncStatusStale({ status: 'starting', updatedAt: 'not a date' }, now, maxAgeMs)).toBe(true);
+    expect(isSyncStatusStale({ status: 'error' }, now, maxAgeMs)).toBe(true);
   });
 
   test('handles missing status', () => {

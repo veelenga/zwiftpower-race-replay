@@ -460,11 +460,16 @@ async function syncRiders(ctx, riderData, errors, signal) {
   }
 }
 
-async function finishCancelledSync(ctx, riderData, errors) {
+async function saveFinishedRace(ctx, riderData, errors) {
   const raceResult = createRaceResult(ctx, riderData, errors, null, false);
   if (riderData.length > 0) {
     await saveRaceData(raceResult);
   }
+  return raceResult;
+}
+
+async function finishCancelledSync(ctx, riderData, errors) {
+  const raceResult = await saveFinishedRace(ctx, riderData, errors);
   await updateSyncStatus(ctx.eventId, { status: 'cancelled', eventName: ctx.fullEventName });
   return raceResult;
 }
@@ -490,7 +495,10 @@ async function syncRaceData(signal) {
   try {
     await syncRiders(ctx, riderData, errors, signal);
   } catch (error) {
-    if (!signal.aborted) throw error;
+    if (!signal.aborted) {
+      await saveFinishedRace(ctx, riderData, errors);
+      throw error;
+    }
   }
 
   if (signal.aborted) {
@@ -501,8 +509,7 @@ async function syncRaceData(signal) {
     throw new Error(NOT_READY_ERROR);
   }
 
-  const raceResult = createRaceResult(ctx, riderData, errors, null, false);
-  await saveRaceData(raceResult);
+  const raceResult = await saveFinishedRace(ctx, riderData, errors);
 
   await updateSyncStatus(ctx.eventId, {
     status: 'complete',
