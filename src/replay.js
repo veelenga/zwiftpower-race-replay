@@ -174,7 +174,7 @@ function renderComparisonPanel() {
     return `
       <span class="compare-chip" style="--chip-color: ${color}" data-pos="${pos}">
         <span class="chip-star">★</span>
-        <span class="chip-name">${firstName}</span>
+        <span class="chip-name">${escapeHtml(firstName)}</span>
         <button class="chip-remove" data-pos="${pos}">×</button>
       </span>
     `;
@@ -282,12 +282,12 @@ function showError(message) {
 
 function populateRiderSelector() {
   const sortedRiders = [...riders].sort((a, b) => a.position - b.position);
-  elements.riderSelect.innerHTML = sortedRiders.map(r => {
-    const isUser = r.isCurrentUser;
-    return `<option value="${r.position}" ${r.position === watchingPosition ? 'selected' : ''}>
-      #${r.position} ${r.name}${isUser ? ' (You)' : ''}
-    </option>`;
-  }).join('');
+  const options = sortedRiders.map(r => {
+    const isSelected = r.position === watchingPosition;
+    const label = `#${r.position} ${r.name}${r.isCurrentUser ? ' (You)' : ''}`;
+    return new Option(label, r.position, isSelected, isSelected);
+  });
+  elements.riderSelect.replaceChildren(...options);
 }
 
 // Elevation profile
@@ -472,7 +472,7 @@ function setupChartCursorTracking(chart, canvas) {
       let html = `<div style="color: #8b949e; margin-bottom: 4px;">${data.label}</div>`;
       data.values.forEach(v => {
         const val = v.value !== undefined && v.value !== null ? Math.round(v.value) : '-';
-        html += `<div><span style="color: ${v.color};">${v.label}:</span> ${val}${unit}</div>`;
+        html += `<div><span style="color: ${v.color};">${escapeHtml(v.label)}:</span> ${val}${unit}</div>`;
       });
       tooltip.innerHTML = html;
       tooltip.style.display = 'block';
@@ -644,18 +644,7 @@ function renderStandings(groups, standings) {
         const overallPos = standings.findIndex(s => s.position === r.position) + 1;
         const classes = ['standings-row', isYou ? 'you' : '', isComparing ? 'comparing' : ''].filter(Boolean).join(' ');
 
-        // Highlight matching text
-        let displayName = r.name;
-        if (searchLower) {
-          const idx = r.name.toLowerCase().indexOf(searchLower);
-          if (idx >= 0) {
-            displayName = r.name.slice(0, idx) +
-              '<mark style="background:#58a6ff33;color:#58a6ff;">' +
-              r.name.slice(idx, idx + searchLower.length) +
-              '</mark>' +
-              r.name.slice(idx + searchLower.length);
-          }
-        }
+        const displayName = highlightMatch(r.name, searchLower);
 
         // Star icon for comparison selection
         const starStyle = compareColor ? `style="color: ${compareColor}"` : '';

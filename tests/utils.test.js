@@ -18,6 +18,8 @@ const {
   calcGroupAverageHR,
   filterRidersByName,
   highlightMatch,
+  escapeHtml,
+  isValidEventId,
   isValidCategory,
   parseCategoryFromHash,
   parseCategoryFromUrl,
@@ -461,8 +463,93 @@ describe('highlightMatch', () => {
   });
 
   test('handles null/undefined name', () => {
-    expect(highlightMatch(null, 'test')).toBe(null);
-    expect(highlightMatch(undefined, 'test')).toBe(undefined);
+    expect(highlightMatch(null, 'test')).toBe('');
+    expect(highlightMatch(undefined, 'test')).toBe('');
+  });
+
+  test('produces exact markup around the match', () => {
+    expect(highlightMatch('John Smith', 'smi')).toBe(
+      'John <mark style="background:#58a6ff33;color:#58a6ff;">Smi</mark>th'
+    );
+  });
+
+  test('uses trimmed search length for the highlighted slice', () => {
+    expect(highlightMatch('John Smith', ' smi ')).toBe(
+      'John <mark style="background:#58a6ff33;color:#58a6ff;">Smi</mark>th'
+    );
+  });
+
+  test('escapes name without a search term', () => {
+    expect(highlightMatch('<b>Bob</b>', '')).toBe('&lt;b&gt;Bob&lt;/b&gt;');
+  });
+
+  test('escapes name when there is no match', () => {
+    expect(highlightMatch('<img src=x onerror=alert(1)>', 'zzz')).toBe(
+      '&lt;img src=x onerror=alert(1)&gt;'
+    );
+  });
+
+  test('escapes text around and inside the mark', () => {
+    expect(highlightMatch('<i>Tom & "Jerry"</i>', '& "j')).toBe(
+      '&lt;i&gt;Tom <mark style="background:#58a6ff33;color:#58a6ff;">&amp; &quot;J</mark>erry&quot;&lt;/i&gt;'
+    );
+  });
+
+  test('matches on raw text rather than escaped entities', () => {
+    expect(highlightMatch('A&B', 'amp')).toBe('A&amp;B');
+  });
+});
+
+describe('escapeHtml', () => {
+  test('escapes HTML special characters', () => {
+    expect(escapeHtml(`<a href="x" title='y'>Tom & Jerry</a>`)).toBe(
+      '&lt;a href=&quot;x&quot; title=&#39;y&#39;&gt;Tom &amp; Jerry&lt;/a&gt;'
+    );
+  });
+
+  test('leaves safe text unchanged', () => {
+    expect(escapeHtml('John Smith #12 (You)')).toBe('John Smith #12 (You)');
+  });
+
+  test('escapes ampersands of existing entities', () => {
+    expect(escapeHtml('&amp;')).toBe('&amp;amp;');
+  });
+
+  test('returns empty string for null/undefined', () => {
+    expect(escapeHtml(null)).toBe('');
+    expect(escapeHtml(undefined)).toBe('');
+  });
+
+  test('stringifies non-string values', () => {
+    expect(escapeHtml(42)).toBe('42');
+    expect(escapeHtml(0)).toBe('0');
+    expect(escapeHtml(false)).toBe('false');
+  });
+});
+
+describe('isValidEventId', () => {
+  test('accepts numeric event ids', () => {
+    expect(isValidEventId('1234567')).toBe(true);
+  });
+
+  test('accepts event ids with a category suffix', () => {
+    expect(isValidEventId('1234567_A')).toBe(true);
+    expect(isValidEventId('1234567_ALL')).toBe(true);
+  });
+
+  test('rejects ids with markup or url characters', () => {
+    expect(isValidEventId('123"><script>')).toBe(false);
+    expect(isValidEventId('123&foo=bar')).toBe(false);
+    expect(isValidEventId('123_a')).toBe(false);
+    expect(isValidEventId('123_')).toBe(false);
+    expect(isValidEventId('abc')).toBe(false);
+  });
+
+  test('rejects empty and non-string values', () => {
+    expect(isValidEventId('')).toBe(false);
+    expect(isValidEventId(null)).toBe(false);
+    expect(isValidEventId(undefined)).toBe(false);
+    expect(isValidEventId(123)).toBe(false);
   });
 });
 

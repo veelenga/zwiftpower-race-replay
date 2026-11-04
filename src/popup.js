@@ -292,7 +292,7 @@ async function deleteRace(eventId) {
  */
 async function loadRaceList() {
   const races = await storage.getRaces();
-  const raceEntries = Object.entries(races);
+  const raceEntries = Object.entries(races).filter(([eventId]) => isValidEventId(eventId));
 
   if (raceEntries.length === 0) {
     elements.raceList.innerHTML = `
@@ -320,7 +320,7 @@ async function loadRaceList() {
       return `
       <div class="race-item" data-event-id="${eventId}">
         <div class="race-item-info">
-          <a href="${zwiftPowerUrl}" target="_blank" class="race-item-name" title="Open on ZwiftPower">${race.eventName || `Race ${eventId}`}</a>
+          <a href="${zwiftPowerUrl}" target="_blank" class="race-item-name" title="Open on ZwiftPower">${escapeHtml(race.eventName || `Race ${eventId}`)}</a>
           <div class="race-item-meta">${race.riders?.length || 0} riders | ${formatRelativeTime(race.syncedAt)}${syncIndicator}</div>
         </div>
         <div class="race-item-actions">

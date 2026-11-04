@@ -299,25 +299,38 @@ function filterRidersByName(riders, searchTerm) {
   return riders.filter(r => r.name && r.name.toLowerCase().includes(searchLower));
 }
 
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const HIGHLIGHT_MARK_OPEN = '<mark style="background:#58a6ff33;color:#58a6ff;">';
+const EVENT_ID_PATTERN = /^\d+(_[A-Z0-9]+)?$/;
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => HTML_ESCAPES[char]);
+}
+
+function isValidEventId(value) {
+  return typeof value === 'string' && EVENT_ID_PATTERN.test(value);
+}
+
 /**
  * Highlight matching text in a name string
  * @param {string} name - Full name
  * @param {string} searchTerm - Search term to highlight
- * @returns {string} Name with HTML highlighting
+ * @returns {string} HTML-escaped name with the first match wrapped in a mark tag
  */
 function highlightMatch(name, searchTerm) {
-  if (!name || !searchTerm || !searchTerm.trim()) return name;
+  if (!name || !searchTerm || !searchTerm.trim()) return escapeHtml(name);
 
   const searchLower = searchTerm.toLowerCase().trim();
-  const idx = name.toLowerCase().indexOf(searchLower);
+  const start = name.toLowerCase().indexOf(searchLower);
 
-  if (idx < 0) return name;
+  if (start < 0) return escapeHtml(name);
 
-  return name.slice(0, idx) +
-    '<mark style="background:#58a6ff33;color:#58a6ff;">' +
-    name.slice(idx, idx + searchTerm.length) +
+  const end = start + searchLower.length;
+  return escapeHtml(name.slice(0, start)) +
+    HIGHLIGHT_MARK_OPEN +
+    escapeHtml(name.slice(start, end)) +
     '</mark>' +
-    name.slice(idx + searchTerm.length);
+    escapeHtml(name.slice(end));
 }
 
 const CATEGORY_PATTERN = /^([A-E]|ALL)$/i;
@@ -447,6 +460,8 @@ if (typeof module !== 'undefined' && module.exports) {
     calcGroupAveragePower,
     calcGroupAverageHR,
     filterRidersByName,
+    escapeHtml,
+    isValidEventId,
     highlightMatch,
     isValidCategory,
     parseCategoryFromHash,
@@ -466,5 +481,6 @@ if (typeof module !== 'undefined' && module.exports) {
     CATEGORY_PATTERN,
     HASH_CATEGORY_PATTERN,
     URL_CATEGORY_PATTERN,
+    EVENT_ID_PATTERN,
   };
 }

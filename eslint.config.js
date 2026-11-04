@@ -18,6 +18,8 @@ const sharedUtils = [
   'calcGroupAveragePower',
   'calcGroupAverageHR',
   'filterRidersByName',
+  'escapeHtml',
+  'isValidEventId',
   'highlightMatch',
   'isValidCategory',
   'parseCategoryFromHash',
