@@ -4,7 +4,7 @@
   "description": "Browser extension to sync and replay Zwift races from ZwiftPower",
   "private": true,
   "scripts": {
-    "lint": "echo 'No linter configured'",
+    "lint": "eslint .",
     "test": "jest",
     "test:watch": "jest --watch",
     "build:firefox": "cp manifest.firefox.json manifest.json && echo 'Switched to Firefox manifest'",
@@ -39,7 +39,14 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@jest/globals": "^30.2.0",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
     "jest": "^30.2.0"
+  },
+  "overrides": {
+    "minimatch": "^11.0.4",
+    "glob": "^14.0.3"
   }
 }

@@ -214,7 +214,7 @@ async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
   } catch (error) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
-      throw new Error(`Request timeout after ${timeoutMs}ms`);
+      throw new Error(`Request timeout after ${timeoutMs}ms`, { cause: error });
     }
     throw error;
   }
@@ -410,31 +410,14 @@ function createRaceResult(ctx, riderData, errors, syncProgress, syncInProgress) 
   };
 }
 
-async function checkDataAvailability(ctx) {
-  await updateSyncStatus({
-    status: 'checking',
-    eventId: ctx.fullEventId,
-    eventName: ctx.fullEventName,
-    message: 'Checking if race data is available...',
-  });
+const NOT_READY_ERROR = 'Race analysis not ready yet. ZwiftPower may still be processing - try again later.';
 
-  const testRider = ctx.newRidersToSync[0];
-  const testAnalysis = await fetchRiderAnalysis(testRider.zwiftId, ctx.eventId);
-
-  if (!testAnalysis) {
-    throw new Error('Race analysis not ready yet. ZwiftPower may still be processing - try again later.');
-  }
-
-  return { testRider, testAnalysis };
-}
-
-async function syncRemainingRiders(ctx, riderData, errors, startIndex) {
+async function syncRiders(ctx, riderData, errors) {
+  const total = ctx.newRidersToSync.length;
   let consecutiveFailures = 0;
 
-  for (let i = startIndex; i < ctx.newRidersToSync.length; i++) {
-    if (currentSyncAbortController?.signal.aborted) {
-      break;
-    }
+  for (let i = 0; i < total; i++) {
+    if (currentSyncAbortController?.signal.aborted) return;
 
     const rider = ctx.newRidersToSync[i];
 
@@ -443,37 +426,30 @@ async function syncRemainingRiders(ctx, riderData, errors, startIndex) {
       eventId: ctx.fullEventId,
       eventName: ctx.fullEventName,
       current: i + 1,
-      total: ctx.newRidersToSync.length,
+      total,
       riderName: rider.name,
       riderPosition: rider.position,
       consecutiveFailures,
     });
 
-    await delay(DELAY_BETWEEN_REQUESTS_MS);
+    if (i > 0) await delay(DELAY_BETWEEN_REQUESTS_MS);
 
     const analysis = await fetchRiderAnalysis(rider.zwiftId, ctx.eventId);
 
-    if (analysis) {
-      consecutiveFailures = 0;
-      riderData.push(createRiderWithAnalysis(rider, analysis));
-
-      const progress = { current: i + 1, total: ctx.newRidersToSync.length };
-      const raceResult = createRaceResult(ctx, riderData, errors, progress, true);
-      await saveRaceData(raceResult);
-    } else {
+    if (!analysis) {
       consecutiveFailures++;
       errors.push(rider.position);
-
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        await updateSyncStatus({
-          status: 'error',
-          error: `Sync stopped: ${consecutiveFailures} consecutive failures. Try again later.`,
-          eventId: ctx.fullEventId,
-          eventName: ctx.fullEventName,
-        });
-        break;
+        throw new Error(riderData.length === 0
+          ? NOT_READY_ERROR
+          : `Sync stopped: ${consecutiveFailures} consecutive failures. Try again later.`);
       }
+      continue;
     }
+
+    consecutiveFailures = 0;
+    riderData.push(createRiderWithAnalysis(rider, analysis));
+    await saveRaceData(createRaceResult(ctx, riderData, errors, { current: i + 1, total }, true));
   }
 }
 
@@ -496,30 +472,16 @@ async function syncRaceData() {
     return ctx.existingRace;
   }
 
-  const { testRider, testAnalysis } = await checkDataAvailability(ctx);
-
   const riderData = [...(ctx.existingRace?.riders || [])];
   const errors = [];
 
-  riderData.push(createRiderWithAnalysis(testRider, testAnalysis));
+  await syncRiders(ctx, riderData, errors);
 
-  const initialProgress = { current: 1, total: ctx.newRidersToSync.length };
-  let raceResult = createRaceResult(ctx, riderData, errors, initialProgress, true);
-  await saveRaceData(raceResult);
+  if (riderData.length === 0) {
+    throw new Error(NOT_READY_ERROR);
+  }
 
-  await updateSyncStatus({
-    status: 'syncing',
-    eventId: ctx.fullEventId,
-    eventName: ctx.fullEventName,
-    current: 1,
-    total: ctx.newRidersToSync.length,
-    riderName: testRider.name,
-    riderPosition: testRider.position,
-  });
-
-  await syncRemainingRiders(ctx, riderData, errors, 1);
-
-  raceResult = createRaceResult(ctx, riderData, errors, null, false);
+  const raceResult = createRaceResult(ctx, riderData, errors, null, false);
   await saveRaceData(raceResult);
 
   await updateSyncStatus({
