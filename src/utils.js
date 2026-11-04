@@ -187,7 +187,7 @@ function detectGroups(standings, time, watchingPosition, sampleInterval = 1) {
       avgPower,
       timeGapToLeader,
       hasYou,
-      name: idx === 0 ? 'Lead Group' : `Group ${idx + 1}`,
+      name: idx === 0 ? 'Lead group' : `Group ${idx + 1}`,
     };
   });
 }

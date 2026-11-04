@@ -192,7 +192,7 @@ describe('detectGroups', () => {
     const groups = detectGroups(standings, 60, 1);
     expect(groups.length).toBe(1);
     expect(groups[0].riders.length).toBe(3);
-    expect(groups[0].name).toBe('Lead Group');
+    expect(groups[0].name).toBe('Lead group');
   });
 
   test('separates riders into groups based on gap', () => {
