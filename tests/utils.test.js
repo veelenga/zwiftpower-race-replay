@@ -39,9 +39,7 @@ const {
   sampleChartWindow,
   resolveShortcut,
   stepSpeed,
-  parseCourseDistanceKm,
   resolveCourseKm,
-  distanceToProfileX,
   buildCurveLookup,
   parseProfileGeometry,
   mapDistanceToAxisX,
@@ -58,8 +56,8 @@ const {
   buildWatchOptions,
   shortRiderName,
   riderMarkerRole,
+  isSameSyncedRace,
   buildRiderStatsText,
-  KM_PER_MILE,
   DEFAULT_SPEED_KMH,
   SEEK_STEP_SECONDS,
   SEEK_SHIFT_STEP_SECONDS,
@@ -1349,25 +1347,8 @@ describe('stepSpeed', () => {
   });
 });
 
-describe('parseCourseDistanceKm', () => {
-  test('reads the distance label in kilometres', () => {
-    expect(parseCourseDistanceKm('Route: Watopia Distance: 28.5km Elevation: 300m')).toBe(28.5);
-    expect(parseCourseDistanceKm('Distance: 42 km')).toBe(42);
-  });
-
-  test('converts miles to kilometres', () => {
-    expect(parseCourseDistanceKm('Distance: 10mi')).toBeCloseTo(10 * KM_PER_MILE);
-  });
-
-  test('returns null when the label is missing or empty', () => {
-    expect(parseCourseDistanceKm('Elevation: 300m')).toBeNull();
-    expect(parseCourseDistanceKm('Distance: 0km')).toBeNull();
-    expect(parseCourseDistanceKm(null)).toBeNull();
-  });
-});
-
 describe('resolveCourseKm', () => {
-  test('prefers the course distance from the page', () => {
+  test('prefers the course length from the profile', () => {
     expect(resolveCourseKm(28.5, [{ totalDistance: 30 }])).toBe(28.5);
   });
 
@@ -1376,26 +1357,9 @@ describe('resolveCourseKm', () => {
     expect(resolveCourseKm(null, riders)).toBe(28.4);
   });
 
-  test('returns 0 without page distance or riders', () => {
+  test('returns 0 without profile course length or riders', () => {
     expect(resolveCourseKm(null, [])).toBe(0);
     expect(resolveCourseKm(undefined, undefined)).toBe(0);
-  });
-});
-
-describe('distanceToProfileX', () => {
-  test('maps distance linearly between the first and last path points', () => {
-    expect(distanceToProfileX(0, 65, 1575, 28.5)).toBe(65);
-    expect(distanceToProfileX(28.5, 65, 1575, 28.5)).toBe(1575);
-    expect(distanceToProfileX(14.25, 65, 1575, 28.5)).toBe(820);
-  });
-
-  test('clamps distances outside the course', () => {
-    expect(distanceToProfileX(-1, 65, 1575, 28.5)).toBe(65);
-    expect(distanceToProfileX(30, 65, 1575, 28.5)).toBe(1575);
-  });
-
-  test('stays at the start when the course length is unknown', () => {
-    expect(distanceToProfileX(10, 65, 1575, 0)).toBe(65);
   });
 });
 
@@ -1482,6 +1446,10 @@ describe('mapDistanceToAxisX', () => {
     expect(mapDistanceToAxisX(8, zoomed)).toBe(50);
     expect(mapDistanceToAxisX(11, zoomed)).toBe(820);
     expect(mapDistanceToAxisX(14, zoomed)).toBe(1590);
+  });
+
+  test('stays at the plot start for an empty range', () => {
+    expect(mapDistanceToAxisX(5, { xMin: 0, xMax: 0, plotLeft: 65, plotWidth: 1510 })).toBe(65);
   });
 
   test('extrapolates outside the visible range', () => {
@@ -1684,17 +1652,32 @@ describe('shortRiderName', () => {
 });
 
 describe('riderMarkerRole', () => {
-  const context = { watchingPosition: 5, leaderPosition: 1, groupPositions: new Set([4, 5, 6]) };
+  const context = { watchedId: '15', leaderId: '11', groupIds: new Set(['14', '15', '16']) };
 
   test('marks the watched rider first, then the leader, then the group', () => {
-    expect(riderMarkerRole(5, context)).toBe('you');
-    expect(riderMarkerRole(1, context)).toBe('leader');
-    expect(riderMarkerRole(4, context)).toBe('group');
-    expect(riderMarkerRole(9, context)).toBe('muted');
+    expect(riderMarkerRole('15', context)).toBe('you');
+    expect(riderMarkerRole('11', context)).toBe('leader');
+    expect(riderMarkerRole('14', context)).toBe('group');
+    expect(riderMarkerRole('19', context)).toBe('muted');
   });
 
   test('keeps the watched rider style when leading', () => {
-    expect(riderMarkerRole(1, { ...context, watchingPosition: 1 })).toBe('you');
+    expect(riderMarkerRole('11', { ...context, watchedId: '11' })).toBe('you');
+  });
+});
+
+describe('isSameSyncedRace', () => {
+  const race = { riders: [{}, {}], syncedAt: '2026-11-04T10:00:00Z' };
+
+  test('matches races with the same rider count and sync time', () => {
+    expect(isSameSyncedRace(race, { riders: [{}, {}], syncedAt: race.syncedAt })).toBe(true);
+    expect(isSameSyncedRace(undefined, null)).toBe(true);
+  });
+
+  test('detects added riders, a new sync or a removed race', () => {
+    expect(isSameSyncedRace(race, { riders: [{}, {}, {}], syncedAt: race.syncedAt })).toBe(false);
+    expect(isSameSyncedRace(race, { riders: [{}, {}], syncedAt: '2026-11-04T10:01:00Z' })).toBe(false);
+    expect(isSameSyncedRace(race, undefined)).toBe(false);
   });
 });
 

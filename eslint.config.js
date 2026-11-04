@@ -40,9 +40,7 @@ const sharedUtils = [
   'sampleChartWindow',
   'resolveShortcut',
   'stepSpeed',
-  'parseCourseDistanceKm',
   'resolveCourseKm',
-  'distanceToProfileX',
   'buildCurveLookup',
   'parseProfileGeometry',
   'mapDistanceToAxisX',
@@ -59,6 +57,7 @@ const sharedUtils = [
   'buildWatchOptions',
   'shortRiderName',
   'riderMarkerRole',
+  'isSameSyncedRace',
   'buildRiderStatsText',
 ];
 

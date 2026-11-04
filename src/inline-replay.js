@@ -1,6 +1,6 @@
 const INLINE_GRAPH_SELECTOR = '#segment_graph';
-const INLINE_PLOT_SELECTOR = 'rect.highcharts-plot-background';
 const INLINE_PATH_SELECTOR = 'path.highcharts-graph';
+const INLINE_PROFILE_ATTRIBUTE = 'data-zp-profile';
 const INLINE_SVG_NS = 'http://www.w3.org/2000/svg';
 const INLINE_HOST_CLASS = 'zp-replay-host';
 const INLINE_DOT_CLASS = 'zp-replay-dot';
@@ -15,18 +15,22 @@ const INLINE_TOOLTIP_GAP_PX = 10;
 const INLINE_TOOLTIP_SHIFTS = { start: '0%', middle: '-50%', end: '-100%' };
 const INLINE_EDGE_INSET_PX = 4;
 const INLINE_EDGE_BOTTOM_PX = 6;
-const INLINE_PROFILE_ATTRIBUTE = 'data-zp-profile';
+const INLINE_HOVER_EVENTS = [
+  ['mouseover', 'target'],
+  ['focusin', 'target'],
+  ['mouseout', 'relatedTarget'],
+  ['focusout', 'relatedTarget'],
+];
 const INLINE_SPEEDS = [1, 5, 10, 30];
 const INLINE_DEFAULT_SPEED = 10;
 
 const inlineReplay = {
   raceKey: null,
+  race: null,
   loadId: 0,
   riders: [],
   selectedId: null,
-  watchingPosition: null,
   sampleInterval: 1,
-  courseKm: 0,
   maxTime: 0,
   time: 0,
   speed: INLINE_DEFAULT_SPEED,
@@ -37,19 +41,13 @@ const inlineReplay = {
   view: null,
 };
 
-const INLINE_SHORTCUTS = {
-  togglePlay: () => toggleInlinePlayback(),
-  seekBy: ({ seconds }) => seekInline(inlineReplay.time + seconds),
-};
-
 function createSvgElement(tagName, className) {
   const element = document.createElementNS(INLINE_SVG_NS, tagName);
   if (className) element.setAttribute('class', className);
   return element;
 }
 
-function createTextSlot(tagName, className) {
-  const element = createControlElement(tagName, className);
+function createTextSlot(element) {
   const text = document.createTextNode('');
   element.append(text);
   return { element, text };
@@ -59,18 +57,20 @@ function setSlotText(slot, value) {
   if (slot.text.data !== value) slot.text.data = value;
 }
 
+function setIfChanged(element, attribute, value) {
+  if (element.getAttribute(attribute) === value) return;
+  if (value === null) element.removeAttribute(attribute);
+  else element.setAttribute(attribute, value);
+}
+
 function findProfileTarget() {
   const graph = document.querySelector(INLINE_GRAPH_SELECTOR);
   const path = graph?.querySelector(INLINE_PATH_SELECTOR);
-  return path ? { graph, path, plot: graph.querySelector(INLINE_PLOT_SELECTOR) } : null;
+  return path ? { graph, path } : null;
 }
 
-function readPageCourseKm(graph) {
-  for (let node = graph.parentElement; node; node = node.parentElement) {
-    const courseKm = parseCourseDistanceKm(node.textContent);
-    if (courseKm) return courseKm;
-  }
-  return null;
+function readProfile(graph) {
+  return parseProfileGeometry(parseJsonOrUndefined(graph.getAttribute(INLINE_PROFILE_ATTRIBUTE)));
 }
 
 function samplePath(path, length, matrix) {
@@ -85,15 +85,22 @@ function samplePath(path, length, matrix) {
   return { xs, ys };
 }
 
-function readProfile(graph) {
-  return parseProfileGeometry(parseJsonOrUndefined(graph.getAttribute(INLINE_PROFILE_ATTRIBUTE)));
+function chartAxis(profile, path, toLayer) {
+  const chartMatrix = path.ownerSVGElement?.getScreenCTM();
+  return chartMatrix ? { ...profile, ...transformPlotBox(profile, toLayer.multiply(chartMatrix)) } : null;
 }
 
-function measureAxis({ graph, path }, toLayer) {
-  const profile = readProfile(graph);
-  const chartMatrix = path.ownerSVGElement?.getScreenCTM();
-  if (!profile || !chartMatrix) return null;
-  return { ...profile, ...transformPlotBox(profile, toLayer.multiply(chartMatrix)) };
+function endpointAxis({ xs, ys }, courseKm) {
+  const firstX = xs[0];
+  const top = Math.min(...ys);
+  return {
+    xMin: 0,
+    xMax: courseKm,
+    plotLeft: firstX,
+    plotWidth: xs[xs.length - 1] - firstX,
+    plotTop: top,
+    plotHeight: Math.max(...ys) - top,
+  };
 }
 
 function measureProfile(view) {
@@ -103,41 +110,25 @@ function measureProfile(view) {
   if (!layerMatrix || !pathMatrix || !(length > 0)) return null;
 
   const toLayer = layerMatrix.inverse();
-  const { xs, ys } = samplePath(view.path, length, toLayer.multiply(pathMatrix));
-  const axis = measureAxis(view, toLayer);
-  const firstX = xs[0];
-  const lastX = xs[xs.length - 1];
-  return {
-    firstX,
-    lastX,
-    minX: axis ? axis.plotLeft : firstX,
-    maxX: axis ? axis.plotLeft + axis.plotWidth : lastX,
-    curveY: buildCurveLookup(xs, ys),
-    axis,
-  };
-}
-
-function updateInlineCourseKm(view) {
-  const profileCourseKm = view.geometry?.axis?.courseKm || view.pageCourseKm;
-  inlineReplay.courseKm = resolveCourseKm(profileCourseKm, inlineReplay.riders);
-}
-
-function positionEdgeCount(edge, x, y) {
-  edge.element.setAttribute('x', String(x));
-  edge.element.setAttribute('y', String(y));
+  const samples = samplePath(view.path, length, toLayer.multiply(pathMatrix));
+  const profile = readProfile(view.graph);
+  const courseKm = resolveCourseKm(profile?.courseKm, inlineReplay.riders);
+  const axis = (profile && chartAxis(profile, view.path, toLayer)) || endpointAxis(samples, courseKm);
+  return { curveY: buildCurveLookup(samples.xs, samples.ys), axis: { ...axis, courseKm } };
 }
 
 function positionEdgeCounts({ edges, geometry }) {
-  const axis = geometry?.axis;
-  if (!axis) return;
-  const y = axis.plotTop + axis.plotHeight - INLINE_EDGE_BOTTOM_PX;
-  positionEdgeCount(edges.behind, axis.plotLeft + INLINE_EDGE_INSET_PX, y);
-  positionEdgeCount(edges.ahead, axis.plotLeft + axis.plotWidth - INLINE_EDGE_INSET_PX, y);
+  if (!geometry) return;
+  const { plotLeft, plotTop, plotWidth, plotHeight } = geometry.axis;
+  const y = String(plotTop + plotHeight - INLINE_EDGE_BOTTOM_PX);
+  setIfChanged(edges.behind.element, 'x', String(plotLeft + INLINE_EDGE_INSET_PX));
+  setIfChanged(edges.behind.element, 'y', y);
+  setIfChanged(edges.ahead.element, 'x', String(plotLeft + plotWidth - INLINE_EDGE_INSET_PX));
+  setIfChanged(edges.ahead.element, 'y', y);
 }
 
 function updateInlineGeometry(view) {
   view.geometry = measureProfile(view);
-  updateInlineCourseKm(view);
   positionEdgeCounts(view);
 }
 
@@ -168,19 +159,22 @@ function hoverInlineDot(zwiftId) {
 
 function handleInlineKeydown(event) {
   const action = resolveShortcut(event);
-  const run = action && INLINE_SHORTCUTS[action.type];
-  if (!run) return;
+  switch (action?.type) {
+    case 'togglePlay':
+      toggleInlinePlayback();
+      break;
+    case 'seekBy':
+      seekInline(inlineReplay.time + action.seconds);
+      break;
+    default:
+      return;
+  }
   event.preventDefault();
-  run(action);
 }
 
-function handleDotClick(event) {
+function activateDot(event) {
+  if (event.type === 'keydown' && event.key !== 'Enter') return;
   const zwiftId = dotIdFrom(event.target);
-  if (zwiftId) selectWatchedRider(zwiftId);
-}
-
-function handleDotKeydown(event) {
-  const zwiftId = event.key === 'Enter' ? dotIdFrom(event.target) : null;
   if (!zwiftId) return;
   event.preventDefault();
   selectWatchedRider(zwiftId);
@@ -191,29 +185,18 @@ function createInlineLayer() {
   layer.setAttribute('role', 'group');
   layer.setAttribute('aria-label', 'Race replay riders');
   layer.addEventListener('keydown', handleInlineKeydown);
-  layer.addEventListener('keydown', handleDotKeydown);
-  layer.addEventListener('click', handleDotClick);
-  layer.addEventListener('mouseover', event => hoverInlineDot(dotIdFrom(event.target)));
-  layer.addEventListener('mouseout', event => hoverInlineDot(dotIdFrom(event.relatedTarget)));
-  layer.addEventListener('focusin', event => hoverInlineDot(dotIdFrom(event.target)));
-  layer.addEventListener('focusout', event => hoverInlineDot(dotIdFrom(event.relatedTarget)));
+  layer.addEventListener('keydown', activateDot);
+  layer.addEventListener('click', activateDot);
+  INLINE_HOVER_EVENTS.forEach(([type, key]) => {
+    layer.addEventListener(type, event => hoverInlineDot(dotIdFrom(event[key])));
+  });
   return layer;
 }
 
-function setSvgVisible(item, visible) {
-  if (item.visible === visible) return;
-  item.visible = visible;
-  if (visible) item.element.removeAttribute('display');
-  else item.element.setAttribute('display', 'none');
-}
-
 function createEdgeCount(side, anchor) {
-  const element = createSvgElement('text', `zp-replay-edge-count zp-replay-edge-count-${side}`);
-  const text = document.createTextNode('');
-  const edge = { element, text, visible: true };
-  element.setAttribute('text-anchor', anchor);
-  element.append(text);
-  setSvgVisible(edge, false);
+  const edge = createTextSlot(createSvgElement('text', `zp-replay-edge-count zp-replay-edge-count-${side}`));
+  edge.element.setAttribute('text-anchor', anchor);
+  edge.element.setAttribute('display', 'none');
   return edge;
 }
 
@@ -223,13 +206,19 @@ function createEdgeCounts(layer) {
   return edges;
 }
 
+function createWatchLabel() {
+  const label = createTextSlot(createSvgElement('text', 'zp-replay-dot-label'));
+  label.element.setAttribute('y', String(-INLINE_LABEL_OFFSET_PX));
+  return label;
+}
+
 function createInlineTooltip() {
   const element = createControlElement('div', 'zp-replay-tooltip');
-  const name = createTextSlot('div', 'zp-replay-tooltip-name');
-  const stats = createTextSlot('div', 'zp-replay-tooltip-stats');
+  const name = createTextSlot(createControlElement('div', 'zp-replay-tooltip-name'));
+  const stats = createTextSlot(createControlElement('div', 'zp-replay-tooltip-stats'));
   element.append(name.element, stats.element);
   element.hidden = true;
-  return { element, name, stats, transform: null };
+  return { element, name, stats };
 }
 
 function createInlineScrubber() {
@@ -263,7 +252,7 @@ function createWatchSelect() {
   caption.textContent = 'Watching';
   select.addEventListener('change', () => selectWatchedRider(select.value));
   element.append(caption, select);
-  return { element, select, options: new Map() };
+  return { element, select };
 }
 
 function createInlineBar() {
@@ -271,11 +260,11 @@ function createInlineBar() {
   const controls = createControlElement('div', 'zp-replay-bar-row');
   const details = createControlElement('div', 'zp-replay-bar-row');
   const play = createControlButton('zp-replay-play', toggleInlinePlayback);
-  const time = createTextSlot('span', 'zp-replay-time');
+  const time = createTextSlot(createControlElement('span', 'zp-replay-time'));
   const scrubber = createInlineScrubber();
   const speeds = createInlineSpeedButtons();
   const watch = createWatchSelect();
-  const stats = createTextSlot('span', 'zp-replay-stats');
+  const stats = createTextSlot(createControlElement('span', 'zp-replay-stats'));
   const open = createControlButton('zp-replay-link zp-replay-open', openFullInlineReplay);
 
   open.textContent = 'Open full replay';
@@ -286,29 +275,27 @@ function createInlineBar() {
   controls.append(play, time.element, scrubber, speeds.element);
   details.append(watch.element, stats.element, open);
   element.append(controls, details);
-  return { element, play, time, scrubber, speedButtons: speeds.buttons, watch, stats };
+  return { element, play, time, scrubber, speedButtons: speeds.buttons, watchSelect: watch.select, stats };
 }
 
-function mountInlineView({ graph, path, plot }) {
+function mountInlineView({ graph, path }) {
   const layer = createInlineLayer();
   const view = {
     graph,
     path,
-    plot,
     layer,
     edges: createEdgeCounts(layer),
+    label: createWatchLabel(),
     tooltip: createInlineTooltip(),
     bar: createInlineBar(),
     dots: new Map(),
     observers: [],
     geometry: null,
-    pageCourseKm: readPageCourseKm(graph),
   };
 
   graph.classList.add(INLINE_HOST_CLASS);
   graph.append(view.layer, view.tooltip.element);
   graph.after(view.bar.element);
-  updateInlineGeometry(view);
   observeProfileChanges(view);
   inlineReplay.view = view;
 }
@@ -348,6 +335,10 @@ function ensureInlineView() {
   return true;
 }
 
+function inlineWatchedRider() {
+  return resolveWatchedRider(inlineReplay.riders, inlineReplay.selectedId);
+}
+
 function createRiderDot(rider) {
   const element = createSvgElement('g', INLINE_DOT_CLASS);
   const circle = createSvgElement('circle');
@@ -356,22 +347,7 @@ function createRiderDot(rider) {
   element.setAttribute('aria-label', rider.name);
   element.dataset.zwiftId = rider.zwiftId;
   element.append(circle);
-  return { element, circle, label: null, role: null, transform: null, anchor: null, visible: true, x: 0, y: 0 };
-}
-
-function setDotLabel(dot, name) {
-  if (!name) {
-    dot.label?.remove();
-    dot.label = null;
-    return;
-  }
-  if (!dot.label) {
-    dot.label = createSvgElement('text', 'zp-replay-dot-label');
-    dot.label.setAttribute('y', String(-INLINE_LABEL_OFFSET_PX));
-    dot.element.append(dot.label);
-    dot.anchor = null;
-  }
-  if (dot.label.textContent !== name) dot.label.textContent = name;
+  return { element, circle, x: null, y: null };
 }
 
 function removeStaleDots(view, riderIds) {
@@ -389,91 +365,87 @@ function addRiderDot(view, rider) {
   return dot;
 }
 
-function findInlineWatchedRider() {
-  return inlineReplay.riders.find(rider => rider.position === inlineReplay.watchingPosition) || null;
+function raiseDot(view, dot) {
+  if (view.layer.lastElementChild === dot.element) return;
+  const hadFocus = document.activeElement === dot.element;
+  view.layer.append(dot.element);
+  if (hadFocus) dot.element.focus({ preventScroll: true });
 }
 
-function raiseWatchedDot(view) {
-  const watched = findInlineWatchedRider();
-  const element = watched && view.dots.get(watched.zwiftId).element;
-  if (!element || view.layer.lastElementChild === element) return;
-
-  const hadFocus = document.activeElement === element;
-  view.layer.append(element);
-  if (hadFocus) element.focus({ preventScroll: true });
+function unmarkWatchedDot(view, rider) {
+  const dot = rider && view.dots.get(rider.zwiftId);
+  if (dot) setIfChanged(dot.element, 'aria-pressed', 'false');
 }
 
-function syncInlineDots(view) {
-  const { riders, watchingPosition } = inlineReplay;
+function markWatchedDot(view, rider) {
+  const dot = rider && view.dots.get(rider.zwiftId);
+  if (!dot) {
+    view.label.element.remove();
+    return;
+  }
+  setIfChanged(dot.element, 'aria-pressed', 'true');
+  setSlotText(view.label, rider.name);
+  if (view.label.element.parentNode !== dot.element) dot.element.append(view.label.element);
+  raiseDot(view, dot);
+}
+
+function syncInlineDots(view, watched) {
+  const { riders } = inlineReplay;
   removeStaleDots(view, new Set(riders.map(rider => rider.zwiftId)));
-
   riders.forEach(rider => {
     const dot = view.dots.get(rider.zwiftId) || addRiderDot(view, rider);
-    const isWatched = rider.position === watchingPosition;
-    dot.element.setAttribute('aria-pressed', String(isWatched));
-    setDotLabel(dot, isWatched ? rider.name : null);
+    setIfChanged(dot.element, 'aria-pressed', String(rider.zwiftId === watched?.zwiftId));
   });
-  raiseWatchedDot(view);
+  markWatchedDot(view, watched);
 }
 
 function computeInlineSnapshot() {
-  const { riders, time, sampleInterval, watchingPosition } = inlineReplay;
+  const { riders, time, sampleInterval } = inlineReplay;
+  const watched = inlineWatchedRider();
   const standings = computeRaceStandings(riders, time, sampleInterval);
-  const groups = detectGroups(standings, time, watchingPosition, sampleInterval);
+  const groups = detectGroups(standings, time, watched?.position, sampleInterval);
   const yourGroup = groups.find(group => group.hasYou);
   return {
+    time,
     standings,
     groups,
     leader: standings[0],
-    you: standings.find(standing => standing.position === watchingPosition),
+    you: standings.find(standing => standing.zwiftId === watched?.zwiftId),
     roleContext: {
-      watchingPosition,
-      leaderPosition: standings[0]?.position,
-      groupPositions: new Set(yourGroup ? yourGroup.riders.map(rider => rider.position) : []),
+      watchedId: watched?.zwiftId,
+      leaderId: standings[0]?.zwiftId,
+      groupIds: new Set(yourGroup ? yourGroup.riders.map(rider => rider.zwiftId) : []),
     },
   };
 }
 
-function standingCourseKm(standing) {
-  const { courseKm } = inlineReplay;
+function standingCourseKm(standing, courseKm) {
   return standing.finished ? courseKm : clamp(standing.currentDistance, 0, courseKm);
 }
 
-function placeStanding(standing, geometry) {
-  const distanceKm = standingCourseKm(standing);
-  const { axis } = geometry;
-  if (!axis) {
-    return { side: 'visible', x: distanceToProfileX(distanceKm, geometry.firstX, geometry.lastX, inlineReplay.courseKm) };
-  }
+function placeStanding(standing, axis) {
+  const distanceKm = standingCourseKm(standing, axis.courseKm);
   return { side: classifyAxisDistance(distanceKm, axis), x: mapDistanceToAxisX(distanceKm, axis) };
 }
 
-function applyDotRole(dot, role) {
-  if (dot.role === role) return;
-  dot.role = role;
-  dot.element.setAttribute('class', `${INLINE_DOT_CLASS} ${INLINE_DOT_CLASS}-${role}`);
-  dot.circle.setAttribute('r', String(INLINE_DOT_RADII[role]));
+function axisAlignment(x, { plotLeft, plotWidth }, marginPx) {
+  return alignNearEdges(x, plotLeft, plotLeft + plotWidth, marginPx);
 }
 
-function applyLabelAnchor(dot, geometry) {
-  const anchor = alignNearEdges(dot.x, geometry.minX, geometry.maxX, INLINE_LABEL_EDGE_PX);
-  if (dot.anchor === anchor) return;
-  dot.anchor = anchor;
-  dot.label.setAttribute('text-anchor', anchor);
-}
-
-function applyDotPosition(dot, x, y, geometry) {
-  const transform = `translate(${x.toFixed(1)} ${y.toFixed(1)})`;
+function renderDot(view, dot, role, x) {
+  const y = view.geometry.curveY(x);
   Object.assign(dot, { x, y });
-  if (dot.transform !== transform) {
-    dot.transform = transform;
-    dot.element.setAttribute('transform', transform);
+  setIfChanged(dot.element, 'display', null);
+  setIfChanged(dot.element, 'class', `${INLINE_DOT_CLASS} ${INLINE_DOT_CLASS}-${role}`);
+  setIfChanged(dot.circle, 'r', String(INLINE_DOT_RADII[role]));
+  setIfChanged(dot.element, 'transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
+  if (role === 'you') {
+    setIfChanged(view.label.element, 'text-anchor', axisAlignment(x, view.geometry.axis, INLINE_LABEL_EDGE_PX));
   }
-  if (dot.label) applyLabelAnchor(dot, geometry);
 }
 
 function renderEdgeCount(edge, count) {
-  setSvgVisible(edge, count > 0);
+  setIfChanged(edge.element, 'display', count > 0 ? null : 'none');
   if (count > 0) setSlotText(edge, `+${count}`);
 }
 
@@ -485,68 +457,66 @@ function renderInlineDots(view, snapshot) {
   snapshot.standings.forEach(standing => {
     const dot = view.dots.get(standing.zwiftId);
     if (!dot) return;
-    const { side, x } = placeStanding(standing, geometry);
-    setSvgVisible(dot, side === 'visible');
-    if (side !== 'visible') {
-      hidden[side]++;
+    const { side, x } = placeStanding(standing, geometry.axis);
+    if (side === 'visible') {
+      renderDot(view, dot, riderMarkerRole(standing.zwiftId, snapshot.roleContext), x);
       return;
     }
-    applyDotRole(dot, riderMarkerRole(standing.position, snapshot.roleContext));
-    applyDotPosition(dot, x, geometry.curveY(x), geometry);
+    setIfChanged(dot.element, 'display', 'none');
+    hidden[side]++;
   });
   renderEdgeCount(view.edges.behind, hidden.behind);
   renderEdgeCount(view.edges.ahead, hidden.ahead);
 }
 
-function tooltipTransform(dot, geometry) {
-  const align = alignNearEdges(dot.x, geometry.minX, geometry.maxX, INLINE_TOOLTIP_EDGE_PX);
+function tooltipTransform(dot, axis) {
+  const align = axisAlignment(dot.x, axis, INLINE_TOOLTIP_EDGE_PX);
   const shiftY = dot.y < INLINE_TOOLTIP_FLIP_PX
     ? `${INLINE_TOOLTIP_GAP_PX}px`
     : `calc(-100% - ${INLINE_TOOLTIP_GAP_PX}px)`;
   return `translate(${dot.x.toFixed(1)}px, ${dot.y.toFixed(1)}px) translate(${INLINE_TOOLTIP_SHIFTS[align]}, ${shiftY})`;
 }
 
+function isDotShown(dot) {
+  return Boolean(dot) && dot.x !== null && dot.element.getAttribute('display') !== 'none';
+}
+
 function hoveredStandingIndex(view, snapshot) {
-  const dot = view.dots.get(inlineReplay.hoveredId);
-  if (!dot?.transform || !dot.visible || !view.geometry) return -1;
+  if (!view.geometry || !isDotShown(view.dots.get(inlineReplay.hoveredId))) return -1;
   return snapshot.standings.findIndex(standing => standing.zwiftId === inlineReplay.hoveredId);
 }
 
-function watchedGapFor(index, { standings, you }) {
+function watchedGapFor(index, { standings, you, time }) {
   const watchedIndex = standings.indexOf(you);
   if (watchedIndex < 0 || watchedIndex === index) return null;
 
   const ahead = index < watchedIndex;
   const [front, back] = ahead ? [standings[index], you] : [you, standings[index]];
-  const seconds = calcStandingGap(front, back, inlineReplay.time, inlineReplay.sampleInterval);
+  const seconds = calcStandingGap(front, back, time, inlineReplay.sampleInterval);
   return { seconds, ahead, name: shortRiderName(you.name) };
 }
 
 function renderInlineTooltip(view, snapshot) {
   const { tooltip } = view;
   const index = hoveredStandingIndex(view, snapshot);
-  if (tooltip.element.hidden !== (index < 0)) tooltip.element.hidden = index < 0;
+  setIfChanged(tooltip.element, 'hidden', index < 0 ? '' : null);
   if (index < 0) return;
 
   const standing = snapshot.standings[index];
-  const { time, sampleInterval } = inlineReplay;
   setSlotText(tooltip.name, standing.name);
   setSlotText(tooltip.stats, buildRiderStatsText({
     rank: index + 1,
     power: standing.currentPower,
-    gapToLeader: calcStandingGap(snapshot.leader, standing, time, sampleInterval),
+    gapToLeader: calcStandingGap(snapshot.leader, standing, snapshot.time, inlineReplay.sampleInterval),
     watchedGap: watchedGapFor(index, snapshot),
   }));
-
-  const transform = tooltipTransform(view.dots.get(standing.zwiftId), view.geometry);
-  if (tooltip.transform === transform) return;
-  tooltip.transform = transform;
-  tooltip.element.style.transform = transform;
+  const transform = tooltipTransform(view.dots.get(standing.zwiftId), view.geometry.axis);
+  setIfChanged(tooltip.element, 'style', `transform: ${transform}`);
 }
 
-function watchedStatsText({ standings, groups, leader, you }) {
+function watchedStatsText({ standings, groups, leader, you, time }) {
   if (!you) return '';
-  const { time, sampleInterval } = inlineReplay;
+  const { sampleInterval } = inlineReplay;
   return buildRiderStatsText({
     rank: standings.indexOf(you) + 1,
     power: you.currentPower,
@@ -587,62 +557,41 @@ function renderInlinePlayState() {
 
 function renderInlineSpeed() {
   inlineReplay.view?.bar.speedButtons.forEach((button, index) => {
-    button.setAttribute('aria-pressed', String(INLINE_SPEEDS[index] === inlineReplay.speed));
+    setIfChanged(button, 'aria-pressed', String(INLINE_SPEEDS[index] === inlineReplay.speed));
   });
 }
 
-function removeStaleOptions(watch, riderIds) {
-  watch.options.forEach((option, zwiftId) => {
-    if (riderIds.has(zwiftId)) return;
-    option.remove();
-    watch.options.delete(zwiftId);
-  });
-}
-
-function ensureWatchOption(watch, { value, label }) {
-  if (!watch.options.has(value)) {
-    const option = document.createElement('option');
-    option.value = value;
-    watch.options.set(value, option);
-  }
-  const option = watch.options.get(value);
-  if (option.textContent !== label) option.textContent = label;
+function createWatchOption({ value, label }) {
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = label;
   return option;
 }
 
-function syncWatchOptions(watch) {
-  const entries = buildWatchOptions(inlineReplay.riders);
-  removeStaleOptions(watch, new Set(entries.map(entry => entry.value)));
-  entries.forEach((entry, index) => {
-    const option = ensureWatchOption(watch, entry);
-    const current = watch.select.options[index];
-    if (current !== option) watch.select.insertBefore(option, current || null);
-  });
-}
-
-function renderWatchSelection(bar) {
-  const watched = findInlineWatchedRider();
-  syncWatchOptions(bar.watch);
-  bar.watch.select.value = watched ? watched.zwiftId : '';
+function renderWatchedRider(bar, watched) {
+  bar.watchSelect.value = watched ? watched.zwiftId : '';
   bar.stats.element.title = watched ? watched.name : '';
 }
 
-function renderInlineBarSetup(bar) {
-  bar.scrubber.max = String(Math.ceil(inlineReplay.maxTime));
-  renderWatchSelection(bar);
+function renderInlineRace(view, watched) {
+  view.bar.watchSelect.replaceChildren(...buildWatchOptions(inlineReplay.riders).map(createWatchOption));
+  view.bar.scrubber.max = String(Math.ceil(inlineReplay.maxTime));
+  renderWatchedRider(view.bar, watched);
   renderInlinePlayState();
   renderInlineSpeed();
 }
 
 function selectWatchedRider(zwiftId) {
-  const rider = inlineReplay.riders.find(candidate => candidate.zwiftId === zwiftId);
-  if (!rider) return;
+  const next = inlineReplay.riders.find(rider => rider.zwiftId === zwiftId);
+  if (!next) return;
 
-  Object.assign(inlineReplay, { selectedId: zwiftId, watchingPosition: rider.position });
+  const previous = inlineWatchedRider();
+  inlineReplay.selectedId = zwiftId;
   const { view } = inlineReplay;
   if (!view) return;
-  syncInlineDots(view);
-  renderWatchSelection(view.bar);
+  if (previous && previous !== next) unmarkWatchedDot(view, previous);
+  markWatchedDot(view, next);
+  renderWatchedRider(view.bar, next);
   renderInlineFrame();
 }
 
@@ -650,9 +599,10 @@ function renderInlineReplay() {
   if (!ensureInlineView()) return;
 
   const { view } = inlineReplay;
-  syncInlineDots(view);
-  updateInlineCourseKm(view);
-  renderInlineBarSetup(view.bar);
+  const watched = inlineWatchedRider();
+  syncInlineDots(view, watched);
+  updateInlineGeometry(view);
+  renderInlineRace(view, watched);
   renderInlineFrame();
 }
 
@@ -701,40 +651,32 @@ function openFullInlineReplay() {
   requestOpenReplay(inlineReplay.raceKey);
 }
 
-function applyInlineRace(race) {
+function setInlineRace(raceKey, race) {
+  const isNewRace = raceKey !== inlineReplay.raceKey;
   const riders = (race?.riders || []).filter(rider => rider.distance?.length > 0);
   const sampleInterval = riders[0]?.sampleInterval || 1;
   const maxTime = calcRaceDuration(riders, sampleInterval);
 
+  if (isNewRace) unmountInlineView();
   Object.assign(inlineReplay, {
-    loadId: inlineReplay.loadId + 1,
+    raceKey,
+    race,
     riders,
     sampleInterval,
     maxTime,
-    watchingPosition: resolveWatchedRider(riders, inlineReplay.selectedId)?.position ?? null,
-    time: Math.min(inlineReplay.time, maxTime),
+    selectedId: isNewRace ? null : inlineReplay.selectedId,
+    hoveredId: isNewRace ? null : inlineReplay.hoveredId,
+    time: isNewRace ? 0 : Math.min(inlineReplay.time, maxTime),
   });
   renderInlineReplay();
 }
 
-function resetInlineRace(raceKey) {
-  unmountInlineView();
-  Object.assign(inlineReplay, {
-    raceKey,
-    loadId: inlineReplay.loadId + 1,
-    riders: [],
-    selectedId: null,
-    time: 0,
-    hoveredId: null,
-  });
-}
-
 async function loadInlineRace(raceKey) {
-  if (raceKey !== inlineReplay.raceKey) resetInlineRace(raceKey);
-  const { loadId } = inlineReplay;
+  const loadId = ++inlineReplay.loadId;
   const race = await getExistingRaceData(raceKey);
-  if (loadId === inlineReplay.loadId) applyInlineRace(race);
-  return raceKey === inlineReplay.raceKey;
+  const isLatest = loadId === inlineReplay.loadId;
+  if (isLatest) setInlineRace(raceKey, race);
+  return isLatest;
 }
 
 function reportInlineError(error) {
@@ -748,7 +690,9 @@ function refreshInlineReplay(raceKey) {
 }
 
 function handleInlineRacesChanged(races) {
-  if (inlineReplay.raceKey) applyInlineRace(races?.[inlineReplay.raceKey]);
+  const { raceKey } = inlineReplay;
+  const race = races?.[raceKey];
+  if (raceKey && !isSameSyncedRace(race, inlineReplay.race)) setInlineRace(raceKey, race);
 }
 
 function revealInlineReplay(view) {

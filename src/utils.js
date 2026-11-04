@@ -661,30 +661,15 @@ function stepSpeed(speeds, current, step) {
   return speeds[clamp(index + step, 0, speeds.length - 1)];
 }
 
-const KM_PER_MILE = 1.609344;
-const COURSE_DISTANCE_PATTERN = /Distance:\s*(\d+(?:\.\d+)?)\s*(km|mi)\b/i;
 const STATS_SEPARATOR = ' · ';
-
-function parseCourseDistanceKm(text) {
-  const match = String(text ?? '').match(COURSE_DISTANCE_PATTERN);
-  if (!match) return null;
-  const value = Number(match[1]);
-  if (!(value > 0)) return null;
-  return match[2].toLowerCase() === 'mi' ? value * KM_PER_MILE : value;
-}
 
 function lastValue(values) {
   return values?.length ? values[values.length - 1] : 0;
 }
 
-function resolveCourseKm(pageCourseKm, riders) {
-  if (pageCourseKm > 0) return pageCourseKm;
+function resolveCourseKm(profileCourseKm, riders) {
+  if (profileCourseKm > 0) return profileCourseKm;
   return Math.max(0, ...(riders || []).map(rider => rider.totalDistance || lastValue(rider.distance)));
-}
-
-function distanceToProfileX(distanceKm, firstX, lastX, courseKm) {
-  if (!(courseKm > 0)) return firstX;
-  return lerp(firstX, lastX, clamp(distanceKm / courseKm, 0, 1));
 }
 
 const PROFILE_AXIS_FIELDS = ['xMin', 'xMax', 'plotLeft', 'plotTop', 'plotWidth', 'plotHeight'];
@@ -697,6 +682,7 @@ function parseProfileGeometry(profile) {
 }
 
 function mapDistanceToAxisX(distanceKm, { xMin, xMax, plotLeft, plotWidth }) {
+  if (!(xMax > xMin)) return plotLeft;
   return plotLeft + ((distanceKm - xMin) / (xMax - xMin)) * plotWidth;
 }
 
@@ -801,10 +787,14 @@ function shortRiderName(name) {
   return String(name ?? '').trim().split(/\s+/)[0];
 }
 
-function riderMarkerRole(position, { watchingPosition, leaderPosition, groupPositions }) {
-  if (position === watchingPosition) return 'you';
-  if (position === leaderPosition) return 'leader';
-  return groupPositions.has(position) ? 'group' : 'muted';
+function riderMarkerRole(zwiftId, { watchedId, leaderId, groupIds }) {
+  if (zwiftId === watchedId) return 'you';
+  if (zwiftId === leaderId) return 'leader';
+  return groupIds.has(zwiftId) ? 'group' : 'muted';
+}
+
+function isSameSyncedRace(a, b) {
+  return a?.riders?.length === b?.riders?.length && a?.syncedAt === b?.syncedAt;
 }
 
 function formatGapTo(seconds, target) {
@@ -869,9 +859,7 @@ if (typeof module !== 'undefined' && module.exports) {
     sampleChartWindow,
     resolveShortcut,
     stepSpeed,
-    parseCourseDistanceKm,
     resolveCourseKm,
-    distanceToProfileX,
     buildCurveLookup,
     parseProfileGeometry,
     mapDistanceToAxisX,
@@ -888,6 +876,7 @@ if (typeof module !== 'undefined' && module.exports) {
     buildWatchOptions,
     shortRiderName,
     riderMarkerRole,
+    isSameSyncedRace,
     buildRiderStatsText,
     // Constants
     SECONDS_PER_MINUTE,
@@ -903,6 +892,5 @@ if (typeof module !== 'undefined' && module.exports) {
     EVENT_ID_PATTERN,
     SEEK_STEP_SECONDS,
     SEEK_SHIFT_STEP_SECONDS,
-    KM_PER_MILE,
   };
 }
