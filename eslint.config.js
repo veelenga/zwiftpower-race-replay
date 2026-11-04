@@ -1,66 +1,7 @@
 const js = require('@eslint/js');
 const globals = require('globals');
 
-const sharedUtils = [
-  'formatTime',
-  'formatTimeGap',
-  'formatRelativeTime',
-  'timeToIndex',
-  'extractZwiftId',
-  'calcSpeed',
-  'calcTimeGapFromDistance',
-  'calcTimeGap',
-  'detectGroups',
-  'selectRidersToSync',
-  'isValidPosition',
-  'lerp',
-  'clamp',
-  'calcGroupAveragePower',
-  'calcGroupAverageHR',
-  'filterRidersByName',
-  'escapeHtml',
-  'isValidEventId',
-  'highlightMatch',
-  'isValidCategory',
-  'parseCategoryFromHash',
-  'parseCategoryFromUrl',
-  'formatCategoryName',
-  'parsePosition',
-  'findClosestIndex',
-  'getValueAtDistance',
-  'isSyncStatusForEvent',
-  'isSyncStatusStale',
-  'buildRaceKey',
-  'summarizeSyncedRaces',
-  'buildReplayControlState',
-  'classifyAnalysisResponse',
-  'parseJsonOrUndefined',
-  'debounce',
-  'throttle',
-  'sampleChartWindow',
-  'resolveShortcut',
-  'stepSpeed',
-  'PLAYBACK_SPEEDS',
-  'resolveCourseKm',
-  'buildCurveLookup',
-  'parseProfileGeometry',
-  'mapDistanceToAxisX',
-  'classifyAxisDistance',
-  'transformPlotBox',
-  'alignNearEdges',
-  'computeRaceStandings',
-  'calcStandingGap',
-  'calcGapToGroupAhead',
-  'advancePlaybackTime',
-  'calcRaceDuration',
-  'findWatchedRider',
-  'resolveWatchedRider',
-  'buildWatchOptions',
-  'shortRiderName',
-  'riderMarkerRole',
-  'isSameSyncedRace',
-  'buildRiderStatsText',
-];
+const sharedUtils = Object.keys(require('./src/utils'));
 
 const contentScriptApi = [
   'createControlElement',
@@ -72,16 +13,20 @@ const contentScriptApi = [
 
 const inlineReplayApi = ['refreshInlineReplay', 'handleInlineRacesChanged', 'watchInlineReplay'];
 
+const readonlyGlobals = names => Object.fromEntries(names.map(name => [name, 'readonly']));
+
 const unusedExceptApi = api => ['error', { varsIgnorePattern: `^(${api.join('|')})$` }];
+
+const scriptOptions = { ecmaVersion: 2022, sourceType: 'script' };
 
 module.exports = [
   { ignores: ['node_modules/**', 'dist/**', 'src/lib/**'] },
   js.configs.recommended,
   {
     files: ['src/**/*.js'],
+    ignores: ['src/profile-bridge.js'],
     languageOptions: {
-      ecmaVersion: 2022,
-      sourceType: 'script',
+      ...scriptOptions,
       globals: {
         ...globals.browser,
         ...globals.webextensions,
@@ -94,19 +39,20 @@ module.exports = [
     files: ['src/**/*.js'],
     ignores: ['src/utils.js', 'src/profile-bridge.js'],
     languageOptions: {
-      globals: Object.fromEntries(sharedUtils.map(name => [name, 'readonly'])),
+      globals: readonlyGlobals(sharedUtils),
     },
   },
   {
     files: ['src/profile-bridge.js'],
     languageOptions: {
-      globals: { chrome: 'off', browser: 'off' },
+      ...scriptOptions,
+      globals: globals.browser,
     },
   },
   {
     files: ['src/inline-replay.js'],
     languageOptions: {
-      globals: Object.fromEntries(contentScriptApi.map(name => [name, 'readonly'])),
+      globals: readonlyGlobals(contentScriptApi),
     },
     rules: {
       'no-unused-vars': unusedExceptApi(inlineReplayApi),
