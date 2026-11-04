@@ -1503,6 +1503,14 @@ describe('computeRaceStandings', () => {
     expect(standings[0]).toMatchObject({ currentDistance: 1.5, currentPower: 350, finished: false });
   });
 
+  test('references the rider instead of copying it', () => {
+    const [first] = computeRaceStandings(riders, 1);
+    expect(first.rider).toBe(riders[1]);
+    expect(first.distance).toBe(riders[1].distance);
+    expect(Object.keys(first).sort())
+      .toEqual(['currentDistance', 'currentPower', 'distance', 'finishTime', 'finished', 'position', 'rider']);
+  });
+
   test('keeps finished riders at their last distance, ordered by finish time', () => {
     const standings = computeRaceStandings(riders, 4);
     expect(standings.map(s => s.position)).toEqual([1, 2, 3]);
@@ -1541,20 +1549,20 @@ describe('calcGapToGroupAhead', () => {
   ];
 
   test('measures the gap to the last rider of the group ahead', () => {
-    expect(calcGapToGroupAhead(groups, you, 60)).toBe(Math.round((0.1 / DEFAULT_SPEED_KMH) * 3600));
+    expect(calcGapToGroupAhead(groups, 1, you, 60)).toBe(Math.round((0.1 / DEFAULT_SPEED_KMH) * 3600));
   });
 
-  test('returns 0 in the lead group or without a watched rider', () => {
-    expect(calcGapToGroupAhead([{ riders: [lead, you], hasYou: true }], you, 60)).toBe(0);
-    expect(calcGapToGroupAhead(groups, undefined, 60)).toBe(0);
-    expect(calcGapToGroupAhead([], you, 60)).toBe(0);
+  test('returns 0 in the lead group, without a group or without a watched rider', () => {
+    expect(calcGapToGroupAhead([{ riders: [lead, you], hasYou: true }], 0, you, 60)).toBe(0);
+    expect(calcGapToGroupAhead(groups, -1, you, 60)).toBe(0);
+    expect(calcGapToGroupAhead(groups, 1, undefined, 60)).toBe(0);
   });
 
   test('uses finish times once both riders finished', () => {
     const finishedTail = { ...tail, finished: true, finishTime: 3600 };
     const finishedYou = { ...you, finished: true, finishTime: 3609 };
     const finishedGroups = [{ riders: [finishedTail], hasYou: false }, { riders: [finishedYou], hasYou: true }];
-    expect(calcGapToGroupAhead(finishedGroups, finishedYou, 3700)).toBe(9);
+    expect(calcGapToGroupAhead(finishedGroups, 1, finishedYou, 3700)).toBe(9);
   });
 });
 

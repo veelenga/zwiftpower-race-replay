@@ -727,7 +727,9 @@ function riderStandingAt(rider, time, sampleInterval) {
   const index = Math.min(timeToIndex(time, sampleInterval), lastIndex);
   const finished = index === lastIndex;
   return {
-    ...rider,
+    rider,
+    position: rider.position,
+    distance: samples,
     currentDistance: samples[index] || 0,
     currentPower: finished ? 0 : rider.power?.[index] || 0,
     finished,
@@ -749,8 +751,7 @@ function calcStandingGap(ahead, behind, time, sampleInterval = 1) {
   return calcTimeGap(ahead, behind, time, sampleInterval);
 }
 
-function calcGapToGroupAhead(groups, watching, time, sampleInterval = 1) {
-  const groupIndex = groups.findIndex(group => group.hasYou);
+function calcGapToGroupAhead(groups, groupIndex, watching, time, sampleInterval = 1) {
   if (!watching || groupIndex <= 0) return 0;
 
   const groupAhead = groups[groupIndex - 1];

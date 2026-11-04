@@ -32,12 +32,14 @@ const inlineReplay = {
   selectedId: null,
   sampleInterval: 1,
   maxTime: 0,
+  maxTimeText: formatTime(0),
   time: 0,
   speed: INLINE_DEFAULT_SPEED,
   playing: false,
   frameId: null,
   lastFrameAt: null,
   hoveredId: null,
+  lastSnapshot: null,
   view: null,
 };
 
@@ -136,6 +138,7 @@ function refreshInlineGeometry() {
   const { view } = inlineReplay;
   if (!view) return;
   updateInlineGeometry(view);
+  inlineReplay.lastSnapshot = null;
   renderInlineFrame();
 }
 
@@ -154,7 +157,8 @@ function dotIdFrom(target) {
 function hoverInlineDot(zwiftId) {
   if (inlineReplay.hoveredId === zwiftId) return;
   inlineReplay.hoveredId = zwiftId;
-  renderInlineFrame();
+  const { view, lastSnapshot } = inlineReplay;
+  if (view && lastSnapshot) renderInlineTooltip(view, lastSnapshot);
 }
 
 function handleInlineKeydown(event) {
@@ -291,6 +295,7 @@ function mountInlineView({ graph, path }) {
     dots: new Map(),
     observers: [],
     geometry: null,
+    renderedSnapshot: null,
   };
 
   graph.classList.add(INLINE_HOST_CLASS);
@@ -399,24 +404,33 @@ function syncInlineDots(view, watched) {
   markWatchedDot(view, watched);
 }
 
-function computeInlineSnapshot() {
+function computeInlineSnapshot(index) {
   const { riders, time, sampleInterval } = inlineReplay;
   const watched = inlineWatchedRider();
   const standings = computeRaceStandings(riders, time, sampleInterval);
   const groups = detectGroups(standings, time, watched?.position, sampleInterval);
-  const yourGroup = groups.find(group => group.hasYou);
+  const ranks = new Map(standings.map((standing, rank) => [standing.rider.zwiftId, rank]));
+  const yourGroupIndex = groups.findIndex(group => group.hasYou);
   return {
+    index,
     time,
     standings,
     groups,
-    leader: standings[0],
-    you: standings.find(standing => standing.zwiftId === watched?.zwiftId),
+    ranks,
+    youIndex: watched ? ranks.get(watched.zwiftId) : -1,
+    yourGroupIndex,
     roleContext: {
       watchedId: watched?.zwiftId,
-      leaderId: standings[0]?.zwiftId,
-      groupIds: new Set(yourGroup ? yourGroup.riders.map(rider => rider.zwiftId) : []),
+      leaderId: standings[0]?.rider.zwiftId,
+      groupIds: new Set((groups[yourGroupIndex]?.riders || []).map(standing => standing.rider.zwiftId)),
     },
   };
+}
+
+function inlineSnapshot() {
+  const index = timeToIndex(inlineReplay.time, inlineReplay.sampleInterval);
+  if (inlineReplay.lastSnapshot?.index !== index) inlineReplay.lastSnapshot = computeInlineSnapshot(index);
+  return inlineReplay.lastSnapshot;
 }
 
 function standingCourseKm(standing, courseKm) {
@@ -455,11 +469,11 @@ function renderInlineDots(view, snapshot) {
 
   const hidden = { behind: 0, ahead: 0 };
   snapshot.standings.forEach(standing => {
-    const dot = view.dots.get(standing.zwiftId);
+    const dot = view.dots.get(standing.rider.zwiftId);
     if (!dot) return;
     const { side, x } = placeStanding(standing, geometry.axis);
     if (side === 'visible') {
-      renderDot(view, dot, riderMarkerRole(standing.zwiftId, snapshot.roleContext), x);
+      renderDot(view, dot, riderMarkerRole(standing.rider.zwiftId, snapshot.roleContext), x);
       return;
     }
     setIfChanged(dot.element, 'display', 'none');
@@ -483,17 +497,17 @@ function isDotShown(dot) {
 
 function hoveredStandingIndex(view, snapshot) {
   if (!view.geometry || !isDotShown(view.dots.get(inlineReplay.hoveredId))) return -1;
-  return snapshot.standings.findIndex(standing => standing.zwiftId === inlineReplay.hoveredId);
+  return snapshot.ranks.get(inlineReplay.hoveredId) ?? -1;
 }
 
-function watchedGapFor(index, { standings, you, time }) {
-  const watchedIndex = standings.indexOf(you);
-  if (watchedIndex < 0 || watchedIndex === index) return null;
+function watchedGapFor(index, { standings, youIndex, time }) {
+  if (youIndex < 0 || youIndex === index) return null;
 
-  const ahead = index < watchedIndex;
+  const you = standings[youIndex];
+  const ahead = index < youIndex;
   const [front, back] = ahead ? [standings[index], you] : [you, standings[index]];
   const seconds = calcStandingGap(front, back, time, inlineReplay.sampleInterval);
-  return { seconds, ahead, name: shortRiderName(you.name) };
+  return { seconds, ahead, name: shortRiderName(you.rider.name) };
 }
 
 function renderInlineTooltip(view, snapshot) {
@@ -503,49 +517,52 @@ function renderInlineTooltip(view, snapshot) {
   if (index < 0) return;
 
   const standing = snapshot.standings[index];
-  setSlotText(tooltip.name, standing.name);
+  setSlotText(tooltip.name, standing.rider.name);
   setSlotText(tooltip.stats, buildRiderStatsText({
     rank: index + 1,
     power: standing.currentPower,
-    gapToLeader: calcStandingGap(snapshot.leader, standing, snapshot.time, inlineReplay.sampleInterval),
+    gapToLeader: calcStandingGap(snapshot.standings[0], standing, snapshot.time, inlineReplay.sampleInterval),
     watchedGap: watchedGapFor(index, snapshot),
   }));
-  const transform = tooltipTransform(view.dots.get(standing.zwiftId), view.geometry.axis);
+  const transform = tooltipTransform(view.dots.get(standing.rider.zwiftId), view.geometry.axis);
   setIfChanged(tooltip.element, 'style', `transform: ${transform}`);
 }
 
-function watchedStatsText({ standings, groups, leader, you, time }) {
-  if (!you) return '';
+function watchedStatsText({ standings, groups, youIndex, yourGroupIndex, time }) {
+  if (youIndex < 0) return '';
   const { sampleInterval } = inlineReplay;
+  const [leader] = standings;
+  const you = standings[youIndex];
   return buildRiderStatsText({
-    rank: standings.indexOf(you) + 1,
+    rank: youIndex + 1,
     power: you.currentPower,
     leaderPower: leader.currentPower,
     gapToLeader: calcStandingGap(leader, you, time, sampleInterval),
-    gapToGroup: calcGapToGroupAhead(groups, you, time, sampleInterval),
+    gapToGroup: calcGapToGroupAhead(groups, yourGroupIndex, you, time, sampleInterval),
   });
 }
 
-function renderInlineControls(view, snapshot) {
-  const { bar } = view;
-  const { time, maxTime } = inlineReplay;
-  const timeText = `${formatTime(time)} / ${formatTime(maxTime)}`;
-  if (bar.time.text.data !== timeText) {
-    bar.time.text.data = timeText;
-    bar.scrubber.value = String(Math.floor(time));
-    bar.scrubber.setAttribute('aria-valuetext', formatTime(time));
-  }
-  setSlotText(bar.stats, watchedStatsText(snapshot));
+function renderInlineTime({ bar }) {
+  const { time, maxTimeText } = inlineReplay;
+  const timeText = `${formatTime(time)} / ${maxTimeText}`;
+  if (bar.time.text.data === timeText) return;
+  bar.time.text.data = timeText;
+  bar.scrubber.value = String(Math.floor(time));
+  bar.scrubber.setAttribute('aria-valuetext', formatTime(time));
 }
 
 function renderInlineFrame() {
   const { view } = inlineReplay;
   if (!view || inlineReplay.riders.length === 0) return;
 
-  const snapshot = computeInlineSnapshot();
-  renderInlineDots(view, snapshot);
-  renderInlineTooltip(view, snapshot);
-  renderInlineControls(view, snapshot);
+  const snapshot = inlineSnapshot();
+  if (view.renderedSnapshot !== snapshot) {
+    view.renderedSnapshot = snapshot;
+    renderInlineDots(view, snapshot);
+    renderInlineTooltip(view, snapshot);
+    setSlotText(view.bar.stats, watchedStatsText(snapshot));
+  }
+  renderInlineTime(view);
 }
 
 function renderInlinePlayState() {
@@ -586,7 +603,7 @@ function selectWatchedRider(zwiftId) {
   if (!next) return;
 
   const previous = inlineWatchedRider();
-  inlineReplay.selectedId = zwiftId;
+  Object.assign(inlineReplay, { selectedId: zwiftId, lastSnapshot: null });
   const { view } = inlineReplay;
   if (!view) return;
   if (previous && previous !== next) unmarkWatchedDot(view, previous);
@@ -664,6 +681,8 @@ function setInlineRace(raceKey, race) {
     riders,
     sampleInterval,
     maxTime,
+    maxTimeText: formatTime(maxTime),
+    lastSnapshot: null,
     selectedId: isNewRace ? null : inlineReplay.selectedId,
     hoveredId: isNewRace ? null : inlineReplay.hoveredId,
     time: isNewRace ? 0 : Math.min(inlineReplay.time, maxTime),
