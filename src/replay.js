@@ -9,6 +9,8 @@ const STORAGE_KEY_RACES = 'syncedRaces';
 // Replay-specific constants
 const MIN_ZOOM_SELECTION_PX = 20;
 const CHART_UPDATE_INTERVAL_MS = 500;
+const STANDINGS_RENDER_INTERVAL_MS = 100;
+const LIVE_SYNC_DEBOUNCE_MS = 300;
 const CHART_WINDOW_SIZE_SECONDS = 600;
 
 // Elevation profile constants
@@ -61,6 +63,7 @@ let isDragging = false;
 let dragStartX = 0;
 let sampleInterval = 1; // Data sample interval (1 = every second, 5 = every 5 seconds)
 let lastChartUpdate = 0; // Timestamp for throttling chart updates
+const renderStandingsThrottled = throttle(renderStandings, STANDINGS_RENDER_INTERVAL_MS);
 
 // DOM Elements
 const elements = {
@@ -110,7 +113,21 @@ function selectRider(pos) {
   watchingPosition = pos;
   expandedGroups.clear();
   elements.riderSelect.value = pos;
-  update();
+  updateNow();
+}
+
+function toggleGroup(gIdx) {
+  if (expandedGroups.has(gIdx)) {
+    expandedGroups.delete(gIdx);
+  } else {
+    expandedGroups.add(gIdx);
+  }
+  updateNow();
+}
+
+function onCompareRidersChange() {
+  renderComparisonPanel();
+  updateNow();
 }
 
 /**
@@ -125,7 +142,7 @@ function toggleCompareRider(pos) {
   } else if (compareRiders.length < MAX_COMPARE_RIDERS) {
     compareRiders.push(pos);
   }
-  update();
+  onCompareRidersChange();
 }
 
 /**
@@ -135,7 +152,7 @@ function removeCompareRider(pos) {
   const index = compareRiders.indexOf(pos);
   if (index >= 0) {
     compareRiders.splice(index, 1);
-    update();
+    onCompareRidersChange();
   }
 }
 
@@ -156,42 +173,48 @@ function getCompareRiderObjects() {
     .filter(Boolean);
 }
 
+function createElement(tag, className, text) {
+  const el = document.createElement(tag);
+  el.className = className;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+function createCompareChip(rider, color) {
+  const chip = createElement('span', 'compare-chip');
+  chip.style.setProperty('--chip-color', color);
+  chip.dataset.pos = rider.position;
+
+  const removeBtn = createElement('button', 'chip-remove', '×');
+  removeBtn.dataset.pos = rider.position;
+
+  chip.append(
+    createElement('span', 'chip-star', '★'),
+    createElement('span', 'chip-name', rider.name.split(' ')[0]),
+    removeBtn,
+  );
+  return chip;
+}
+
 /**
  * Render the comparison panel showing selected riders
  */
 function renderComparisonPanel() {
-  if (compareRiders.length === 0) {
-    elements.comparisonPanel.classList.add('hidden');
-    return;
-  }
+  const panel = elements.comparisonPanel;
+  panel.classList.toggle('hidden', compareRiders.length === 0);
+  if (compareRiders.length === 0) return;
 
-  elements.comparisonPanel.classList.remove('hidden');
-  const chips = compareRiders.map((pos, idx) => {
+  const chips = compareRiders.flatMap((pos, idx) => {
     const rider = riders.find(r => r.position === pos);
-    if (!rider) return '';
-    const color = COMPARE_COLORS[idx];
-    const firstName = rider.name.split(' ')[0];
-    return `
-      <span class="compare-chip" style="--chip-color: ${color}" data-pos="${pos}">
-        <span class="chip-star">★</span>
-        <span class="chip-name">${firstName}</span>
-        <button class="chip-remove" data-pos="${pos}">×</button>
-      </span>
-    `;
-  }).join('');
-
-  elements.comparisonPanel.innerHTML = `
-    <span class="compare-label">Comparing:</span>
-    ${chips}
-  `;
-
-  // Add click handlers for remove buttons
-  elements.comparisonPanel.querySelectorAll('.chip-remove').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      removeCompareRider(parseInt(btn.dataset.pos));
-    });
+    return rider ? [createCompareChip(rider, COMPARE_COLORS[idx])] : [];
   });
+
+  panel.replaceChildren(createElement('span', 'compare-label', 'Comparing:'), ...chips);
+}
+
+function handleComparisonClick(e) {
+  const removeBtn = e.target.closest('.chip-remove');
+  if (removeBtn) removeCompareRider(Number(removeBtn.dataset.pos));
 }
 
 // Data loading
@@ -215,39 +238,16 @@ async function loadRaceData() {
     }
 
     currentEventId = eventId;
-    elements.raceInfo.textContent = `${raceData.eventName} | ${raceData.riders.length} riders`;
-
-    // Show/hide sync banner with progress
-    if (raceData.syncInProgress) {
-      elements.syncBanner.classList.remove('hidden');
-      if (raceData.syncProgress) {
-        elements.syncText.textContent = `Syncing ${raceData.syncProgress.current}/${raceData.syncProgress.total}...`;
-      }
-    } else {
-      elements.syncBanner.classList.add('hidden');
-    }
+    renderRaceStatus(raceData);
 
     sampleInterval = raceData.riders[0]?.sampleInterval || 1;
-
-    riders = raceData.riders.map(r => ({
-      position: r.position,
-      name: r.name,
-      zwiftId: r.zwiftId,
-      duration: r.duration,
-      power: r.power || [],
-      heartRate: r.heartRate || [],
-      elevation: r.elevation || [],
-      distance: r.distance || null,
-      isCurrentUser: r.isCurrentUser,
-    }));
+    riders = raceData.riders.map(toReplayRider);
 
     // Find current user or default to first rider
     const currentUser = riders.find(r => r.isCurrentUser);
     watchingPosition = currentUser?.position || riders[0]?.position || 1;
 
-    // maxTime is in real seconds (duration * sampleInterval)
-    maxTime = Math.max(...riders.map(r => r.duration * sampleInterval));
-    elements.timeSlider.max = maxTime;
+    updateMaxTime();
 
     // Calculate total distance (last element of distance array)
     const maxDistance = Math.max(...riders.map(r => {
@@ -274,6 +274,34 @@ async function loadRaceData() {
   }
 }
 
+function toReplayRider(r) {
+  return {
+    position: r.position,
+    name: r.name,
+    zwiftId: r.zwiftId,
+    duration: r.duration,
+    power: r.power || [],
+    heartRate: r.heartRate || [],
+    elevation: r.elevation || [],
+    distance: r.distance || null,
+    isCurrentUser: r.isCurrentUser,
+  };
+}
+
+function renderRaceStatus(raceData) {
+  const { eventName, syncInProgress, syncProgress } = raceData;
+  elements.raceInfo.textContent = `${eventName} | ${raceData.riders.length} riders`;
+  elements.syncBanner.classList.toggle('hidden', !syncInProgress);
+  if (syncInProgress && syncProgress) {
+    elements.syncText.textContent = `Syncing ${syncProgress.current}/${syncProgress.total}...`;
+  }
+}
+
+function updateMaxTime() {
+  maxTime = Math.max(...riders.map(r => r.duration * sampleInterval));
+  elements.timeSlider.max = maxTime;
+}
+
 function showError(message) {
   elements.loadingOverlay.classList.add('hidden');
   elements.errorText.textContent = message;
@@ -282,12 +310,12 @@ function showError(message) {
 
 function populateRiderSelector() {
   const sortedRiders = [...riders].sort((a, b) => a.position - b.position);
-  elements.riderSelect.innerHTML = sortedRiders.map(r => {
-    const isUser = r.isCurrentUser;
-    return `<option value="${r.position}" ${r.position === watchingPosition ? 'selected' : ''}>
-      #${r.position} ${r.name}${isUser ? ' (You)' : ''}
-    </option>`;
-  }).join('');
+  const options = sortedRiders.map(r => {
+    const isSelected = r.position === watchingPosition;
+    const label = `#${r.position} ${r.name}${r.isCurrentUser ? ' (You)' : ''}`;
+    return new Option(label, r.position, isSelected, isSelected);
+  });
+  elements.riderSelect.replaceChildren(...options);
 }
 
 // Elevation profile
@@ -472,7 +500,7 @@ function setupChartCursorTracking(chart, canvas) {
       let html = `<div style="color: #8b949e; margin-bottom: 4px;">${data.label}</div>`;
       data.values.forEach(v => {
         const val = v.value !== undefined && v.value !== null ? Math.round(v.value) : '-';
-        html += `<div><span style="color: ${v.color};">${v.label}:</span> ${val}${unit}</div>`;
+        html += `<div><span style="color: ${v.color};">${escapeHtml(v.label)}:</span> ${val}${unit}</div>`;
       });
       tooltip.innerHTML = html;
       tooltip.style.display = 'block';
@@ -595,8 +623,7 @@ function update() {
     elements.gapToGroup.textContent = '-';
   }
 
-  renderStandings(groups, standings);
-  renderComparisonPanel();
+  renderStandingsThrottled(groups, standings);
   updateRiderMarkers(groups);
 
   // Throttle chart updates during playback for better performance
@@ -607,6 +634,11 @@ function update() {
     updateHRChart(t, you, compareTargets);
     lastChartUpdate = now;
   }
+}
+
+function updateNow() {
+  update();
+  renderStandingsThrottled.flush();
 }
 
 function renderStandings(groups, standings) {
@@ -631,7 +663,7 @@ function renderStandings(groups, standings) {
     const expandIcon = isExpanded ? '▼' : '▶';
     html += `
       <div class="${headerClasses}" data-group="${gIdx}">
-        <span class="group-name"><span class="expand-icon" data-toggle="${gIdx}">${expandIcon}</span> ${group.name} (${displayCount})${isYourGroup ? ' ★' : ''}</span>
+        <span class="group-name"><span class="expand-icon">${expandIcon}</span> ${group.name} (${displayCount})${isYourGroup ? ' ★' : ''}</span>
         <span class="group-info">${group.avgPower}W avg ${formatTimeGap(group.timeGapToLeader)}</span>
       </div>`;
 
@@ -644,18 +676,7 @@ function renderStandings(groups, standings) {
         const overallPos = standings.findIndex(s => s.position === r.position) + 1;
         const classes = ['standings-row', isYou ? 'you' : '', isComparing ? 'comparing' : ''].filter(Boolean).join(' ');
 
-        // Highlight matching text
-        let displayName = r.name;
-        if (searchLower) {
-          const idx = r.name.toLowerCase().indexOf(searchLower);
-          if (idx >= 0) {
-            displayName = r.name.slice(0, idx) +
-              '<mark style="background:#58a6ff33;color:#58a6ff;">' +
-              r.name.slice(idx, idx + searchLower.length) +
-              '</mark>' +
-              r.name.slice(idx + searchLower.length);
-          }
-        }
+        const displayName = highlightMatch(r.name, searchLower);
 
         // Star icon for comparison selection
         const starStyle = compareColor ? `style="color: ${compareColor}"` : '';
@@ -677,33 +698,13 @@ function renderStandings(groups, standings) {
   }
 
   elements.standings.innerHTML = html;
+}
 
-  // Event listeners
-  elements.standings.querySelectorAll('.expand-icon').forEach(icon => {
-    icon.onclick = (e) => {
-      e.stopPropagation();
-      const gIdx = parseInt(icon.dataset.toggle);
-      expandedGroups.has(gIdx) ? expandedGroups.delete(gIdx) : expandedGroups.add(gIdx);
-      update();
-    };
-  });
-
-  elements.standings.querySelectorAll('.group-header').forEach(header => {
-    header.onclick = (e) => {
-      if (e.target.classList.contains('expand-icon')) return;
-      const gIdx = parseInt(header.dataset.group);
-      // Toggle group expansion on header click
-      expandedGroups.has(gIdx) ? expandedGroups.delete(gIdx) : expandedGroups.add(gIdx);
-      update();
-    };
-  });
-
-  elements.standings.querySelectorAll('.standings-row:not(.you)').forEach(row => {
-    row.onclick = () => {
-      const pos = parseInt(row.dataset.pos);
-      toggleCompareRider(pos);
-    };
-  });
+function handleStandingsClick(e) {
+  const header = e.target.closest('.group-header');
+  const row = e.target.closest('.standings-row:not(.you)');
+  if (header) toggleGroup(Number(header.dataset.group));
+  else if (row) toggleCompareRider(Number(row.dataset.pos));
 }
 
 function updateRiderMarkers(groups) {
@@ -912,10 +913,13 @@ function initEventListeners() {
   elements.timeSlider.oninput = (e) => { currentTime = +e.target.value; update(); };
   elements.riderSelect.onchange = (e) => selectRider(parseInt(e.target.value));
 
+  elements.standings.addEventListener('click', handleStandingsClick);
+  elements.comparisonPanel.addEventListener('click', handleComparisonClick);
+
   // Rider search
   elements.riderSearch.oninput = (e) => {
     riderSearchTerm = e.target.value;
-    update();
+    updateNow();
   };
 
   document.querySelectorAll('[data-speed]').forEach(btn => {
@@ -1039,58 +1043,24 @@ function initEventListeners() {
   });
 }
 
-/**
- * Update riders when new data is synced
- */
-function updateRidersFromRaceData(raceData) {
-  const newRiders = raceData.riders.map(r => ({
-    position: r.position,
-    name: r.name,
-    zwiftId: r.zwiftId,
-    duration: r.duration,
-    power: r.power || [],
-    heartRate: r.heartRate || [],
-    elevation: r.elevation || [],
-    distance: r.distance || null,
-    isCurrentUser: r.isCurrentUser,
-  }));
+function applyLiveRaceData(raceData) {
+  renderRaceStatus(raceData);
+  if (raceData.riders.length <= riders.length) return;
 
-  // Only update if there are more riders or sync status changed
-  if (newRiders.length > riders.length || raceData.syncInProgress !== !elements.syncBanner.classList.contains('hidden')) {
-    riders = newRiders;
-    elements.raceInfo.textContent = `${raceData.eventName} | ${raceData.riders.length} riders`;
-
-    // Update sync banner with progress
-    if (raceData.syncInProgress) {
-      elements.syncBanner.classList.remove('hidden');
-      if (raceData.syncProgress) {
-        elements.syncText.textContent = `Syncing ${raceData.syncProgress.current}/${raceData.syncProgress.total}...`;
-      }
-    } else {
-      elements.syncBanner.classList.add('hidden');
-    }
-
-    // Re-populate selector if new riders added
-    populateRiderSelector();
-
-    // Update display
-    update();
-    console.log(`[Replay] Updated to ${riders.length} riders`);
-  }
+  riders = raceData.riders.map(toReplayRider);
+  updateMaxTime();
+  populateRiderSelector();
+  update();
+  console.log(`[Replay] Updated to ${riders.length} riders`);
 }
 
-/**
- * Listen for storage changes to update riders in real-time
- */
+const applyLiveRaceDataDebounced = debounce(applyLiveRaceData, LIVE_SYNC_DEBOUNCE_MS);
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local' || !changes[STORAGE_KEY_RACES] || !currentEventId) return;
 
-  const races = changes[STORAGE_KEY_RACES].newValue || {};
-  const raceData = races[currentEventId];
-
-  if (raceData) {
-    updateRidersFromRaceData(raceData);
-  }
+  const raceData = changes[STORAGE_KEY_RACES].newValue?.[currentEventId];
+  if (raceData) applyLiveRaceDataDebounced(raceData);
 });
 
 // Initialize

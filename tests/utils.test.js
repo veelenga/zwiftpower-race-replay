@@ -18,6 +18,8 @@ const {
   calcGroupAverageHR,
   filterRidersByName,
   highlightMatch,
+  escapeHtml,
+  isValidEventId,
   isValidCategory,
   parseCategoryFromHash,
   parseCategoryFromUrl,
@@ -25,6 +27,11 @@ const {
   parsePosition,
   findClosestIndex,
   getValueAtDistance,
+  isSyncStatusForEvent,
+  isSyncStatusStale,
+  classifyAnalysisResponse,
+  debounce,
+  throttle,
   DEFAULT_SPEED_KMH,
 } = require('../src/utils');
 
@@ -461,8 +468,93 @@ describe('highlightMatch', () => {
   });
 
   test('handles null/undefined name', () => {
-    expect(highlightMatch(null, 'test')).toBe(null);
-    expect(highlightMatch(undefined, 'test')).toBe(undefined);
+    expect(highlightMatch(null, 'test')).toBe('');
+    expect(highlightMatch(undefined, 'test')).toBe('');
+  });
+
+  test('produces exact markup around the match', () => {
+    expect(highlightMatch('John Smith', 'smi')).toBe(
+      'John <mark style="background:#58a6ff33;color:#58a6ff;">Smi</mark>th'
+    );
+  });
+
+  test('uses trimmed search length for the highlighted slice', () => {
+    expect(highlightMatch('John Smith', ' smi ')).toBe(
+      'John <mark style="background:#58a6ff33;color:#58a6ff;">Smi</mark>th'
+    );
+  });
+
+  test('escapes name without a search term', () => {
+    expect(highlightMatch('<b>Bob</b>', '')).toBe('&lt;b&gt;Bob&lt;/b&gt;');
+  });
+
+  test('escapes name when there is no match', () => {
+    expect(highlightMatch('<img src=x onerror=alert(1)>', 'zzz')).toBe(
+      '&lt;img src=x onerror=alert(1)&gt;'
+    );
+  });
+
+  test('escapes text around and inside the mark', () => {
+    expect(highlightMatch('<i>Tom & "Jerry"</i>', '& "j')).toBe(
+      '&lt;i&gt;Tom <mark style="background:#58a6ff33;color:#58a6ff;">&amp; &quot;J</mark>erry&quot;&lt;/i&gt;'
+    );
+  });
+
+  test('matches on raw text rather than escaped entities', () => {
+    expect(highlightMatch('A&B', 'amp')).toBe('A&amp;B');
+  });
+});
+
+describe('escapeHtml', () => {
+  test('escapes HTML special characters', () => {
+    expect(escapeHtml(`<a href="x" title='y'>Tom & Jerry</a>`)).toBe(
+      '&lt;a href=&quot;x&quot; title=&#39;y&#39;&gt;Tom &amp; Jerry&lt;/a&gt;'
+    );
+  });
+
+  test('leaves safe text unchanged', () => {
+    expect(escapeHtml('John Smith #12 (You)')).toBe('John Smith #12 (You)');
+  });
+
+  test('escapes ampersands of existing entities', () => {
+    expect(escapeHtml('&amp;')).toBe('&amp;amp;');
+  });
+
+  test('returns empty string for null/undefined', () => {
+    expect(escapeHtml(null)).toBe('');
+    expect(escapeHtml(undefined)).toBe('');
+  });
+
+  test('stringifies non-string values', () => {
+    expect(escapeHtml(42)).toBe('42');
+    expect(escapeHtml(0)).toBe('0');
+    expect(escapeHtml(false)).toBe('false');
+  });
+});
+
+describe('isValidEventId', () => {
+  test('accepts numeric event ids', () => {
+    expect(isValidEventId('1234567')).toBe(true);
+  });
+
+  test('accepts event ids with a category suffix', () => {
+    expect(isValidEventId('1234567_A')).toBe(true);
+    expect(isValidEventId('1234567_ALL')).toBe(true);
+  });
+
+  test('rejects ids with markup or url characters', () => {
+    expect(isValidEventId('123"><script>')).toBe(false);
+    expect(isValidEventId('123&foo=bar')).toBe(false);
+    expect(isValidEventId('123_a')).toBe(false);
+    expect(isValidEventId('123_')).toBe(false);
+    expect(isValidEventId('abc')).toBe(false);
+  });
+
+  test('rejects empty and non-string values', () => {
+    expect(isValidEventId('')).toBe(false);
+    expect(isValidEventId(null)).toBe(false);
+    expect(isValidEventId(undefined)).toBe(false);
+    expect(isValidEventId(123)).toBe(false);
   });
 });
 
@@ -693,5 +785,216 @@ describe('getValueAtDistance', () => {
 
     // At distance 3.0km: |3.0-2.8|=0.2, |3.0-4.0|=1.0, so 2.8km (idx 4) is closer
     expect(getValueAtDistance(distances, elevations, 3.0)).toBe(110);
+  });
+});
+
+describe('isSyncStatusForEvent', () => {
+  test('matches status with the same event ID', () => {
+    expect(isSyncStatusForEvent({ status: 'syncing', eventId: '123' }, '123')).toBe(true);
+  });
+
+  test('rejects status for another event', () => {
+    expect(isSyncStatusForEvent({ status: 'syncing', eventId: '456' }, '123')).toBe(false);
+  });
+
+  test('rejects missing status or event ID', () => {
+    expect(isSyncStatusForEvent(null, '123')).toBe(false);
+    expect(isSyncStatusForEvent(undefined, '123')).toBe(false);
+    expect(isSyncStatusForEvent({ status: 'syncing' }, null)).toBe(false);
+    expect(isSyncStatusForEvent({ status: 'syncing' }, undefined)).toBe(false);
+  });
+});
+
+describe('isSyncStatusStale', () => {
+  const now = Date.parse('2026-01-01T12:00:00.000Z');
+  const maxAgeMs = 2 * 60 * 1000;
+  const updatedAgo = ms => new Date(now - ms).toISOString();
+
+  test('keeps a recently updated status', () => {
+    expect(isSyncStatusStale({ status: 'syncing', updatedAt: updatedAgo(30000) }, now, maxAgeMs)).toBe(false);
+    expect(isSyncStatusStale({ status: 'starting', updatedAt: updatedAgo(maxAgeMs) }, now, maxAgeMs)).toBe(false);
+    expect(isSyncStatusStale({ status: 'error', updatedAt: updatedAgo(30000) }, now, maxAgeMs)).toBe(false);
+  });
+
+  test('flags an active status older than max age', () => {
+    expect(isSyncStatusStale({ status: 'syncing', updatedAt: updatedAgo(maxAgeMs + 1) }, now, maxAgeMs)).toBe(true);
+    expect(isSyncStatusStale({ status: 'starting', updatedAt: updatedAgo(10 * 60 * 1000) }, now, maxAgeMs)).toBe(true);
+  });
+
+  test('flags a finished status older than max age', () => {
+    const updatedAt = updatedAgo(60 * 60 * 1000);
+    expect(isSyncStatusStale({ status: 'error', updatedAt }, now, maxAgeMs)).toBe(true);
+    expect(isSyncStatusStale({ status: 'complete', updatedAt }, now, maxAgeMs)).toBe(true);
+    expect(isSyncStatusStale({ status: 'cancelled', updatedAt }, now, maxAgeMs)).toBe(true);
+  });
+
+  test('flags a status without a valid timestamp', () => {
+    expect(isSyncStatusStale({ status: 'syncing' }, now, maxAgeMs)).toBe(true);
+    expect(isSyncStatusStale({ status: 'starting', updatedAt: 'not a date' }, now, maxAgeMs)).toBe(true);
+    expect(isSyncStatusStale({ status: 'error' }, now, maxAgeMs)).toBe(true);
+  });
+
+  test('handles missing status', () => {
+    expect(isSyncStatusStale(null, now, maxAgeMs)).toBe(false);
+    expect(isSyncStatusStale(undefined, now, maxAgeMs)).toBe(false);
+  });
+});
+
+describe('classifyAnalysisResponse', () => {
+  const apiUrl = 'https://zwiftpower.com/api3.php?do=analysis&zwift_id=1&zwift_event_id=2';
+  const analysisJson = JSON.stringify({ xData: [0, 0.1, 0.2], x2Data: [0, 1, 2] });
+  const loginPage = '<!DOCTYPE html><html><head><title>Login</title></head><body></body></html>';
+  const classify = fields => classifyAnalysisResponse({ status: 200, url: apiUrl, ...fields });
+
+  test('accepts JSON with distance data', () => {
+    expect(classify({ contentType: 'application/json', bodyText: analysisJson })).toBe('ok');
+  });
+
+  test('accepts JSON served with an HTML content type', () => {
+    expect(classify({ contentType: 'text/html; charset=UTF-8', bodyText: analysisJson })).toBe('ok');
+  });
+
+  test('flags unauthorized and forbidden statuses as auth', () => {
+    expect(classify({ status: 401 })).toBe('auth');
+    expect(classify({ status: 403 })).toBe('auth');
+  });
+
+  test('flags a redirect to a login page as auth', () => {
+    expect(classify({ url: 'https://zwiftpower.com/ucp.php?mode=login', bodyText: loginPage })).toBe('auth');
+    expect(classify({ url: 'https://secure.zwift.com/auth/realms/zwift/protocol/openid-connect/auth' })).toBe('auth');
+  });
+
+  test('flags an HTML document body as auth', () => {
+    expect(classify({ contentType: 'text/html', bodyText: loginPage })).toBe('auth');
+    expect(classify({ contentType: '', bodyText: `\n  ${loginPage}` })).toBe('auth');
+    expect(classify({ contentType: 'text/html', bodyText: '<div>Please log in</div>' })).toBe('auth');
+  });
+
+  test('flags 429 as rate limited', () => {
+    expect(classify({ status: 429 })).toBe('rate-limited');
+  });
+
+  test('flags 5xx statuses as server errors', () => {
+    expect(classify({ status: 500 })).toBe('server-error');
+    expect(classify({ status: 503 })).toBe('server-error');
+  });
+
+  test('treats an empty body as empty', () => {
+    expect(classify({ bodyText: '' })).toBe('empty');
+    expect(classify({ bodyText: '   \n' })).toBe('empty');
+    expect(classifyAnalysisResponse({ status: 200 })).toBe('empty');
+  });
+
+  test('treats JSON without distance data as empty', () => {
+    expect(classify({ bodyText: '{}' })).toBe('empty');
+    expect(classify({ bodyText: '{"xData":[]}' })).toBe('empty');
+    expect(classify({ bodyText: 'null' })).toBe('empty');
+    expect(classify({ bodyText: '{"xData":"1,2"}' })).toBe('empty');
+  });
+
+  test('treats a non JSON, non HTML body as invalid', () => {
+    expect(classify({ contentType: 'text/plain', bodyText: 'Something went wrong' })).toBe('invalid');
+    expect(classify({ contentType: 'text/html', bodyText: 'Something went wrong' })).toBe('invalid');
+  });
+
+  test('treats other non success statuses as invalid', () => {
+    expect(classify({ status: 404 })).toBe('invalid');
+    expect(classify({ status: 0 })).toBe('invalid');
+  });
+});
+
+describe('debounce', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  test('runs once with the latest arguments after the delay', () => {
+    const fn = jest.fn();
+    const debounced = debounce(fn, 300);
+
+    debounced('a');
+    jest.advanceTimersByTime(200);
+    debounced('b');
+    jest.advanceTimersByTime(299);
+    expect(fn).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(1);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledWith('b');
+  });
+
+  test('runs again for calls after the delay has passed', () => {
+    const fn = jest.fn();
+    const debounced = debounce(fn, 300);
+
+    debounced(1);
+    jest.advanceTimersByTime(300);
+    debounced(2);
+    jest.advanceTimersByTime(300);
+
+    expect(fn.mock.calls).toEqual([[1], [2]]);
+  });
+});
+
+describe('throttle', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  test('runs the first call immediately', () => {
+    const fn = jest.fn();
+    throttle(fn, 100)('first');
+    expect(fn).toHaveBeenCalledWith('first');
+  });
+
+  test('runs at most once per interval and ends with the latest arguments', () => {
+    const fn = jest.fn();
+    const throttled = throttle(fn, 100);
+
+    throttled(1);
+    throttled(2);
+    jest.advanceTimersByTime(50);
+    throttled(3);
+    expect(fn.mock.calls).toEqual([[1]]);
+
+    jest.advanceTimersByTime(50);
+    expect(fn.mock.calls).toEqual([[1], [3]]);
+
+    jest.advanceTimersByTime(500);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  test('runs immediately again once the interval has passed', () => {
+    const fn = jest.fn();
+    const throttled = throttle(fn, 100);
+
+    throttled(1);
+    jest.advanceTimersByTime(150);
+    throttled(2);
+
+    expect(fn.mock.calls).toEqual([[1], [2]]);
+  });
+
+  test('flush runs a pending call right away and drops its timer', () => {
+    const fn = jest.fn();
+    const throttled = throttle(fn, 100);
+
+    throttled(1);
+    throttled(2);
+    throttled.flush();
+    expect(fn.mock.calls).toEqual([[1], [2]]);
+
+    jest.advanceTimersByTime(500);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  test('flush does nothing without a pending call', () => {
+    const fn = jest.fn();
+    const throttled = throttle(fn, 100);
+
+    throttled.flush();
+    expect(fn).not.toHaveBeenCalled();
+
+    throttled(1);
+    throttled.flush();
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });

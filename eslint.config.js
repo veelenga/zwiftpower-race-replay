@@ -18,6 +18,8 @@ const sharedUtils = [
   'calcGroupAveragePower',
   'calcGroupAverageHR',
   'filterRidersByName',
+  'escapeHtml',
+  'isValidEventId',
   'highlightMatch',
   'isValidCategory',
   'parseCategoryFromHash',
@@ -26,6 +28,11 @@ const sharedUtils = [
   'parsePosition',
   'findClosestIndex',
   'getValueAtDistance',
+  'isSyncStatusForEvent',
+  'isSyncStatusStale',
+  'classifyAnalysisResponse',
+  'debounce',
+  'throttle',
 ];
 
 module.exports = [

@@ -5,6 +5,9 @@
 
 const STORAGE_KEY_RACES = 'syncedRaces';
 const STORAGE_KEY_SYNC_STATUS = 'syncStatus';
+const SYNC_STATUS_MAX_AGE_MS = 2 * 60 * 1000;
+const COMPLETE_RESET_DELAY_MS = 3000;
+const RESTORABLE_SYNC_STATUSES = ['starting', 'syncing', 'error'];
 
 // DOM Elements
 const elements = {
@@ -23,6 +26,8 @@ const elements = {
 };
 
 let currentTabId = null;
+let currentEventId = null;
+let resetTimerId = null;
 
 /**
  * Storage helper functions
@@ -49,83 +54,77 @@ const storage = {
   },
 };
 
-/**
- * Update sync progress UI
- */
+function setSyncButton(label, { disabled = false, busy = false } = {}) {
+  elements.syncBtn.disabled = disabled;
+  elements.syncBtn.querySelector('.btn-text').textContent = label;
+  elements.syncBtn.querySelector('.btn-spinner').classList.toggle('hidden', !busy);
+}
+
+function showProgress(text, { percent, cancellable = false } = {}) {
+  elements.syncProgress.classList.remove('hidden');
+  elements.cancelBtn.classList.toggle('hidden', !cancellable);
+  elements.progressText.textContent = text;
+  if (percent !== undefined) {
+    elements.progressFill.style.width = `${percent}%`;
+  }
+}
+
+function hideProgress() {
+  elements.syncProgress.classList.add('hidden');
+  elements.cancelBtn.classList.add('hidden');
+}
+
+function renderStarting() {
+  setSyncButton('Starting...', { disabled: true, busy: true });
+  showProgress('Starting sync...', { percent: 0 });
+}
+
+function renderSyncing(status) {
+  const percent = status.total > 0 ? (status.current / status.total) * 100 : 0;
+  setSyncButton('Syncing...', { disabled: true, busy: true });
+  showProgress(`Syncing ${status.current}/${status.total}: #${status.riderPosition} ${status.riderName}`, {
+    percent,
+    cancellable: true,
+  });
+
+  if (status.eventName) {
+    elements.raceName.textContent = status.eventName;
+  }
+}
+
+function renderComplete(status) {
+  const skipped = status.errors > 0 ? ` (${status.errors} skipped)` : '';
+  setSyncButton('Synced!');
+  showProgress(`Done! ${status.successfulSyncs} riders synced${skipped}`, { percent: 100 });
+  loadRaceList();
+
+  resetTimerId = setTimeout(() => {
+    setSyncButton('Re-sync race');
+    hideProgress();
+  }, COMPLETE_RESET_DELAY_MS);
+}
+
+function renderError(status) {
+  setSyncButton('Retry sync');
+  showProgress(status.error || 'Unknown error');
+}
+
+function renderCancelled() {
+  setSyncButton('Sync race');
+  hideProgress();
+}
+
+const syncStatusRenderers = {
+  starting: renderStarting,
+  syncing: renderSyncing,
+  complete: renderComplete,
+  error: renderError,
+  cancelled: renderCancelled,
+};
+
 function updateSyncProgress(status) {
-  if (!status) {
-    elements.syncProgress.classList.add('hidden');
-    return;
-  }
-
-  const btnText = elements.syncBtn.querySelector('.btn-text');
-  const btnSpinner = elements.syncBtn.querySelector('.btn-spinner');
-
-  switch (status.status) {
-    case 'starting':
-    case 'extracting':
-      elements.syncBtn.disabled = true;
-      btnText.textContent = 'Starting...';
-      btnSpinner.classList.remove('hidden');
-      elements.syncProgress.classList.remove('hidden');
-      elements.progressFill.style.width = '0%';
-      elements.progressText.textContent = 'Starting sync...';
-      break;
-
-    case 'syncing': {
-      elements.syncBtn.disabled = true;
-      btnText.textContent = 'Syncing...';
-      btnSpinner.classList.remove('hidden');
-      elements.syncProgress.classList.remove('hidden');
-      elements.cancelBtn.classList.remove('hidden');
-
-      const percent = status.total > 0 ? (status.current / status.total) * 100 : 0;
-      elements.progressFill.style.width = `${percent}%`;
-      elements.progressText.textContent = `Syncing ${status.current}/${status.total}: #${status.riderPosition} ${status.riderName}`;
-
-      // Update race name if available
-      if (status.eventName) {
-        elements.raceName.textContent = status.eventName;
-      }
-      break;
-    }
-
-    case 'complete':
-      elements.syncBtn.disabled = false;
-      btnText.textContent = 'Synced!';
-      btnSpinner.classList.add('hidden');
-      elements.cancelBtn.classList.add('hidden');
-      elements.progressFill.style.width = '100%';
-      elements.progressText.textContent = `Done! ${status.successfulSyncs} riders synced` +
-        (status.errors > 0 ? ` (${status.errors} skipped)` : '');
-
-      // Reload race list
-      loadRaceList();
-
-      // Reset button after delay
-      setTimeout(() => {
-        elements.syncBtn.disabled = false;
-        btnText.textContent = 'Re-sync Race';
-        elements.syncProgress.classList.add('hidden');
-        storage.clearSyncStatus();
-      }, 3000);
-      break;
-
-    case 'error':
-      elements.syncBtn.disabled = false;
-      btnText.textContent = 'Sync Failed';
-      btnSpinner.classList.add('hidden');
-      elements.cancelBtn.classList.add('hidden');
-      elements.progressText.textContent = status.error || 'Unknown error';
-
-      setTimeout(() => {
-        elements.syncBtn.disabled = false;
-        btnText.textContent = 'Retry Sync';
-        elements.syncProgress.classList.add('hidden');
-        storage.clearSyncStatus();
-      }, 3000);
-      break;
-  }
+  clearTimeout(resetTimerId);
+  syncStatusRenderers[status.status]?.(status);
 }
 
 /**
@@ -133,8 +132,7 @@ function updateSyncProgress(status) {
  */
 function showNotOnRacePage(message) {
   elements.raceCard.classList.add('hidden');
-  elements.syncBtn.disabled = true;
-  elements.syncBtn.querySelector('.btn-text').textContent = message;
+  setSyncButton(message, { disabled: true });
 }
 
 /**
@@ -163,20 +161,17 @@ function showRaceInfo(response) {
   elements.raceMeta.textContent = `${response.riderCount} riders${userStatus}`;
 }
 
-/**
- * Show ongoing sync status
- */
-async function showOngoingSyncIfAny() {
-  const syncStatus = await storage.getSyncStatus();
-  if (syncStatus && (syncStatus.status === 'syncing' || syncStatus.status === 'extracting')) {
-    elements.raceCard.classList.remove('hidden');
-    elements.raceName.textContent = syncStatus.eventName || 'Syncing race...';
-    elements.raceMeta.textContent = 'Sync in progress';
-    elements.syncBtn.disabled = true;
-    updateSyncProgress(syncStatus);
-    return true;
+async function restoreSyncStatus() {
+  const status = await storage.getSyncStatus();
+
+  if (isSyncStatusStale(status, Date.now(), SYNC_STATUS_MAX_AGE_MS)) {
+    await storage.clearSyncStatus();
+    return;
   }
-  return false;
+
+  if (isSyncStatusForEvent(status, currentEventId) && RESTORABLE_SYNC_STATUSES.includes(status.status)) {
+    updateSyncProgress(status);
+  }
 }
 
 /**
@@ -189,7 +184,6 @@ async function checkCurrentPage() {
 
     if (!tab?.url?.includes('zwiftpower.com')) {
       showNotOnRacePage('Open a ZwiftPower race');
-      await showOngoingSyncIfAny();
       return;
     }
 
@@ -197,76 +191,39 @@ async function checkCurrentPage() {
 
     if (!response?.isEventPage) {
       showNotOnRacePage('Navigate to a race page');
-      await showOngoingSyncIfAny();
       return;
     }
 
+    currentEventId = response.eventId;
     showRaceInfo(response);
 
-    // Check if already synced
     const existingRaces = await storage.getRaces();
     if (existingRaces[response.eventId]) {
-      elements.syncBtn.querySelector('.btn-text').textContent = 'Re-sync Race';
+      setSyncButton('Re-sync race');
     }
 
-    // Check for ongoing sync
-    const syncStatus = await storage.getSyncStatus();
-    if (syncStatus && ['starting', 'syncing', 'extracting'].includes(syncStatus.status)) {
-      updateSyncProgress(syncStatus);
-    }
+    await restoreSyncStatus();
   } catch (error) {
     console.log('[Popup] Error checking page:', error.message);
     showNotOnRacePage('Open a ZwiftPower race');
-    await showOngoingSyncIfAny();
   }
 }
 
 /**
  * Start race sync via background service worker
  */
-async function startSync() {
-  if (!currentTabId) {
-    const syncStatus = await storage.getSyncStatus();
-    if (syncStatus && syncStatus.status === 'syncing') {
-      return;
-    }
-    return;
-  }
+function startSync() {
+  if (!currentTabId) return;
 
-  updateSyncProgress({ status: 'extracting' });
-
-  // Send start command to background service worker
-  chrome.runtime.sendMessage({
-    action: 'startSync',
-    tabId: currentTabId,
-  });
+  updateSyncProgress({ status: 'starting' });
+  chrome.runtime.sendMessage({ action: 'startSync', tabId: currentTabId });
 }
 
-async function cancelSync() {
-  if (!currentTabId) {
-    return;
-  }
+function cancelSync() {
+  if (!currentTabId) return;
 
-  chrome.runtime.sendMessage({
-    action: 'cancelSync',
-    tabId: currentTabId,
-  });
-
-  const btnText = elements.syncBtn.querySelector('.btn-text');
-  const btnSpinner = elements.syncBtn.querySelector('.btn-spinner');
-
-  elements.syncBtn.disabled = false;
-  btnText.textContent = 'Sync Cancelled';
-  btnSpinner.classList.add('hidden');
-  elements.cancelBtn.classList.add('hidden');
-  elements.progressText.textContent = 'Sync cancelled by user';
-
-  await storage.clearSyncStatus();
-
-  setTimeout(() => {
-    btnText.textContent = 'Re-sync Race';
-    elements.syncProgress.classList.add('hidden');
-  }, 2000);
+  chrome.runtime.sendMessage({ action: 'cancelSync', tabId: currentTabId });
+  updateSyncProgress({ status: 'cancelled' });
 }
 
 /**
@@ -292,7 +249,7 @@ async function deleteRace(eventId) {
  */
 async function loadRaceList() {
   const races = await storage.getRaces();
-  const raceEntries = Object.entries(races);
+  const raceEntries = Object.entries(races).filter(([eventId]) => isValidEventId(eventId));
 
   if (raceEntries.length === 0) {
     elements.raceList.innerHTML = `
@@ -320,7 +277,7 @@ async function loadRaceList() {
       return `
       <div class="race-item" data-event-id="${eventId}">
         <div class="race-item-info">
-          <a href="${zwiftPowerUrl}" target="_blank" class="race-item-name" title="Open on ZwiftPower">${race.eventName || `Race ${eventId}`}</a>
+          <a href="${zwiftPowerUrl}" target="_blank" class="race-item-name" title="Open on ZwiftPower">${escapeHtml(race.eventName || `Race ${eventId}`)}</a>
           <div class="race-item-meta">${race.riders?.length || 0} riders | ${formatRelativeTime(race.syncedAt)}${syncIndicator}</div>
         </div>
         <div class="race-item-actions">
@@ -342,16 +299,15 @@ async function loadRaceList() {
   });
 }
 
-/**
- * Listen for storage changes to update progress
- */
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'local' && changes[STORAGE_KEY_SYNC_STATUS]) {
-    const newStatus = changes[STORAGE_KEY_SYNC_STATUS].newValue;
+  if (areaName !== 'local') return;
+
+  const newStatus = changes[STORAGE_KEY_SYNC_STATUS]?.newValue;
+  if (isSyncStatusForEvent(newStatus, currentEventId)) {
     updateSyncProgress(newStatus);
   }
-  // Refresh race list when races change
-  if (areaName === 'local' && changes.syncedRaces) {
+
+  if (changes[STORAGE_KEY_RACES]) {
     loadRaceList();
   }
 });

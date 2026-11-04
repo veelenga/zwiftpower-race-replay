@@ -299,25 +299,38 @@ function filterRidersByName(riders, searchTerm) {
   return riders.filter(r => r.name && r.name.toLowerCase().includes(searchLower));
 }
 
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const HIGHLIGHT_MARK_OPEN = '<mark style="background:#58a6ff33;color:#58a6ff;">';
+const EVENT_ID_PATTERN = /^\d+(_[A-Z0-9]+)?$/;
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => HTML_ESCAPES[char]);
+}
+
+function isValidEventId(value) {
+  return typeof value === 'string' && EVENT_ID_PATTERN.test(value);
+}
+
 /**
  * Highlight matching text in a name string
  * @param {string} name - Full name
  * @param {string} searchTerm - Search term to highlight
- * @returns {string} Name with HTML highlighting
+ * @returns {string} HTML-escaped name with the first match wrapped in a mark tag
  */
 function highlightMatch(name, searchTerm) {
-  if (!name || !searchTerm || !searchTerm.trim()) return name;
+  if (!name || !searchTerm || !searchTerm.trim()) return escapeHtml(name);
 
   const searchLower = searchTerm.toLowerCase().trim();
-  const idx = name.toLowerCase().indexOf(searchLower);
+  const start = name.toLowerCase().indexOf(searchLower);
 
-  if (idx < 0) return name;
+  if (start < 0) return escapeHtml(name);
 
-  return name.slice(0, idx) +
-    '<mark style="background:#58a6ff33;color:#58a6ff;">' +
-    name.slice(idx, idx + searchTerm.length) +
+  const end = start + searchLower.length;
+  return escapeHtml(name.slice(0, start)) +
+    HIGHLIGHT_MARK_OPEN +
+    escapeHtml(name.slice(start, end)) +
     '</mark>' +
-    name.slice(idx + searchTerm.length);
+    escapeHtml(name.slice(end));
 }
 
 const CATEGORY_PATTERN = /^([A-E]|ALL)$/i;
@@ -428,6 +441,84 @@ function getValueAtDistance(distanceArray, dataArray, targetDistance) {
   return dataArray[idx] || 0;
 }
 
+function isSyncStatusForEvent(status, eventId) {
+  return Boolean(status && eventId) && status.eventId === eventId;
+}
+
+function isSyncStatusStale(status, now, maxAgeMs) {
+  if (!status) return false;
+  const updatedAt = Date.parse(status.updatedAt);
+  return Number.isNaN(updatedAt) || now - updatedAt > maxAgeMs;
+}
+
+const AUTH_STATUSES = [401, 403];
+const RATE_LIMITED_STATUS = 429;
+const SERVER_ERROR_STATUS = 500;
+const LOGIN_URL_PATTERN = /login|\/auth\//i;
+const HTML_CONTENT_TYPE_PATTERN = /\btext\/html\b/i;
+const HTML_DOCUMENT_PATTERN = /<!doctype html|<html[\s>]/i;
+
+function parseJsonOrUndefined(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+function isHtmlBody(contentType, bodyText) {
+  return HTML_DOCUMENT_PATTERN.test(bodyText) ||
+    (HTML_CONTENT_TYPE_PATTERN.test(contentType) && bodyText.trimStart().startsWith('<'));
+}
+
+function classifyAnalysisResponse({ status, contentType = '', bodyText = '', url = '' }) {
+  if (AUTH_STATUSES.includes(status) || LOGIN_URL_PATTERN.test(url)) return 'auth';
+  if (status === RATE_LIMITED_STATUS) return 'rate-limited';
+  if (status >= SERVER_ERROR_STATUS) return 'server-error';
+  if (status < 200 || status >= 300) return 'invalid';
+  if (!bodyText.trim()) return 'empty';
+
+  const data = parseJsonOrUndefined(bodyText);
+  if (data === undefined) return isHtmlBody(contentType, bodyText) ? 'auth' : 'invalid';
+  return Array.isArray(data?.xData) && data.xData.length > 0 ? 'ok' : 'empty';
+}
+
+function debounce(fn, delayMs) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delayMs);
+  };
+}
+
+function throttle(fn, intervalMs) {
+  let lastRunAt = -Infinity;
+  let timer = null;
+  let pendingArgs = null;
+
+  const run = () => {
+    clearTimeout(timer);
+    timer = null;
+    lastRunAt = Date.now();
+    const args = pendingArgs;
+    pendingArgs = null;
+    fn(...args);
+  };
+
+  const throttled = (...args) => {
+    pendingArgs = args;
+    const waitMs = intervalMs - (Date.now() - lastRunAt);
+    if (waitMs <= 0) run();
+    else if (!timer) timer = setTimeout(run, waitMs);
+  };
+
+  throttled.flush = () => {
+    if (pendingArgs) run();
+  };
+
+  return throttled;
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -447,6 +538,8 @@ if (typeof module !== 'undefined' && module.exports) {
     calcGroupAveragePower,
     calcGroupAverageHR,
     filterRidersByName,
+    escapeHtml,
+    isValidEventId,
     highlightMatch,
     isValidCategory,
     parseCategoryFromHash,
@@ -455,6 +548,11 @@ if (typeof module !== 'undefined' && module.exports) {
     parsePosition,
     findClosestIndex,
     getValueAtDistance,
+    isSyncStatusForEvent,
+    isSyncStatusStale,
+    classifyAnalysisResponse,
+    debounce,
+    throttle,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,
@@ -466,5 +564,6 @@ if (typeof module !== 'undefined' && module.exports) {
     CATEGORY_PATTERN,
     HASH_CATEGORY_PATTERN,
     URL_CATEGORY_PATTERN,
+    EVENT_ID_PATTERN,
   };
 }

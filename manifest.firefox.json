@@ -5,15 +5,14 @@
   "description": "Analyze and replay your Zwift races with detailed visualizations",
   "browser_specific_settings": {
     "gecko": {
-      "id": "zwiftpower-race-replay@example.com",
+      "id": "zwiftpower-race-replay@veelenga.github.io",
       "strict_min_version": "109.0"
     }
   },
   "permissions": [
     "storage",
     "unlimitedStorage",
-    "activeTab",
-    "cookies"
+    "activeTab"
   ],
   "host_permissions": [
     "https://zwiftpower.com/*"
@@ -34,22 +33,11 @@
   "content_scripts": [
     {
       "matches": ["https://zwiftpower.com/*"],
-      "js": ["src/content.js"],
+      "js": ["src/utils.js", "src/content.js"],
       "run_at": "document_idle"
     }
   ],
   "background": {
     "scripts": ["src/background.js"]
-  },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "src/replay.html",
-        "src/replay.js",
-        "src/replay.css",
-        "src/lib/chart.min.js"
-      ],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }
