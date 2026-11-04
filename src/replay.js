@@ -60,6 +60,7 @@ let isDragging = false;
 let dragStartX = 0;
 let sampleInterval = 1;
 let lastChartUpdate = 0;
+let legendSignature = '';
 let currentEventId = null;
 const renderStandingsThrottled = throttle(renderStandings, STANDINGS_RENDER_INTERVAL_MS);
 
@@ -88,7 +89,7 @@ const elements = {
   zoomResetBtn: document.getElementById('zoomResetBtn'),
   standings: document.getElementById('standings'),
   riderSearch: document.getElementById('riderSearch'),
-  comparisonPanel: document.getElementById('comparisonPanel'),
+  chartLegend: document.getElementById('chartLegend'),
   chart: document.getElementById('chart'),
   chartTooltip: document.getElementById('chartTooltip'),
   loadingOverlay: document.getElementById('loadingOverlay'),
@@ -107,6 +108,7 @@ function getWatchingRiderName() {
 
 function selectRider(pos) {
   watchingPosition = pos;
+  compareRiders = compareRiders.filter(p => p !== pos);
   expandedGroups.clear();
   elements.riderSelect.value = pos;
   updateNow();
@@ -121,11 +123,6 @@ function toggleGroup(gIdx) {
   updateNow();
 }
 
-function onCompareRidersChange() {
-  renderComparisonPanel();
-  updateNow();
-}
-
 function toggleCompareRider(pos) {
   if (pos === watchingPosition) return;
 
@@ -135,14 +132,14 @@ function toggleCompareRider(pos) {
   } else if (compareRiders.length < MAX_COMPARE_RIDERS) {
     compareRiders.push(pos);
   }
-  onCompareRidersChange();
+  updateNow();
 }
 
 function removeCompareRider(pos) {
   const index = compareRiders.indexOf(pos);
   if (index >= 0) {
     compareRiders.splice(index, 1);
-    onCompareRidersChange();
+    updateNow();
   }
 }
 
@@ -164,36 +161,35 @@ function createElement(tag, className, text) {
   return el;
 }
 
-function createCompareChip(rider, color) {
-  const chip = createElement('span', 'compare-chip');
+function createChipRemoveButton(rider) {
+  const button = createElement('button', 'chip-remove', '×');
+  button.type = 'button';
+  button.dataset.pos = rider.position;
+  button.title = 'Remove from comparison';
+  button.setAttribute('aria-label', `Remove ${rider.name} from comparison`);
+  return button;
+}
+
+function createLegendChip({ rider, color, role }) {
+  const chip = createElement('span', `legend-chip ${role}`);
+  chip.setAttribute('role', 'listitem');
   chip.style.setProperty('--chip-color', color);
-  chip.dataset.pos = rider.position;
-
-  const removeBtn = createElement('button', 'chip-remove', '×');
-  removeBtn.dataset.pos = rider.position;
-
-  chip.append(
-    createElement('span', 'chip-star', '★'),
-    createElement('span', 'chip-name', rider.name.split(' ')[0]),
-    removeBtn,
-  );
+  chip.title = role === 'watching' ? `${rider.name} (watching)` : rider.name;
+  chip.append(createElement('span', 'chip-swatch'), createElement('span', 'chip-name', rider.name));
+  if (role === 'leader') chip.append(createElement('span', 'chip-role', 'leader'));
+  if (role === 'compare') chip.append(createChipRemoveButton(rider));
   return chip;
 }
 
-function renderComparisonPanel() {
-  const panel = elements.comparisonPanel;
-  panel.classList.toggle('hidden', compareRiders.length === 0);
-  if (compareRiders.length === 0) return;
+function renderChartLegend(series) {
+  const signature = series.map(({ rider, role }) => `${role}:${rider.position}:${rider.name}`).join('|');
+  if (signature === legendSignature) return;
 
-  const chips = compareRiders.flatMap((pos, idx) => {
-    const rider = riders.find(r => r.position === pos);
-    return rider ? [createCompareChip(rider, COMPARE_COLORS[idx])] : [];
-  });
-
-  panel.replaceChildren(createElement('span', 'compare-label', 'Comparing:'), ...chips);
+  legendSignature = signature;
+  elements.chartLegend.replaceChildren(...series.map(createLegendChip));
 }
 
-function handleComparisonClick(e) {
+function handleLegendClick(e) {
   const removeBtn = e.target.closest('.chip-remove');
   if (removeBtn) removeCompareRider(Number(removeBtn.dataset.pos));
 }
@@ -467,6 +463,7 @@ function updateChart(t, you, leader) {
   chart.data.labels = labels;
   chart.data.datasets = chartSeries.flatMap(chartDatasets);
   chart.update('none');
+  renderChartLegend(chartSeries);
 }
 
 function chartIndexAt(x) {
@@ -542,6 +539,7 @@ function update() {
 }
 
 function updateNow() {
+  lastChartUpdate = 0;
   update();
   renderStandingsThrottled.flush();
 }
@@ -603,6 +601,11 @@ function updateChartThrottled(t, you, leader) {
   lastChartUpdate = now;
 }
 
+function compareRowTitle(isComparing) {
+  if (isComparing) return 'Remove from comparison';
+  return compareRiders.length < MAX_COMPARE_RIDERS ? 'Add to comparison' : `Comparison is full (max ${MAX_COMPARE_RIDERS})`;
+}
+
 function renderStandings(groups, standings) {
   let html = '';
   const searchLower = riderSearchTerm.toLowerCase().trim();
@@ -622,7 +625,7 @@ function renderStandings(groups, standings) {
     const expandIcon = isExpanded ? '▼' : '▶';
     html += `
       <div class="${headerClasses}" data-group="${gIdx}">
-        <span class="group-name"><span class="expand-icon">${expandIcon}</span> ${group.name} (${displayCount})${isYourGroup ? ' ★' : ''}</span>
+        <span class="group-name"><span class="expand-icon">${expandIcon}</span> ${group.name} (${displayCount})</span>
         <span class="group-info">${group.avgPower}W avg ${formatTimeGap(group.timeGapToLeader)}</span>
       </div>`;
 
@@ -636,16 +639,15 @@ function renderStandings(groups, standings) {
         const classes = ['standings-row', isYou ? 'you' : '', isComparing ? 'comparing' : ''].filter(Boolean).join(' ');
 
         const displayName = highlightMatch(r.name, searchLower);
-
-        const starStyle = compareColor ? `style="color: ${compareColor}"` : '';
-        const starIcon = isYou ? '' : `<span class="compare-star" ${starStyle}>${isComparing ? '★' : '☆'}</span>`;
+        const compareDot = compareColor ? `<span class="compare-dot" style="background: ${compareColor}"></span>` : '';
+        const rowTitle = isYou ? '' : `title="${compareRowTitle(isComparing)}"`;
 
         html += `
-          <div class="${classes}" data-pos="${r.position}">
+          <div class="${classes}" data-pos="${r.position}" ${rowTitle}>
             <span class="pos">${overallPos}</span>
             <span class="name">${displayName}</span>
+            ${compareDot}
             <span class="power">${r.currentPower}W</span>
-            ${starIcon}
           </div>`;
       });
     }
@@ -888,7 +890,7 @@ function initEventListeners() {
   initProfileInteractions();
   elements.riderSelect.addEventListener('change', (e) => selectRider(Number(e.target.value)));
   elements.standings.addEventListener('click', handleStandingsClick);
-  elements.comparisonPanel.addEventListener('click', handleComparisonClick);
+  elements.chartLegend.addEventListener('click', handleLegendClick);
   elements.riderSearch.addEventListener('input', (e) => {
     riderSearchTerm = e.target.value;
     updateNow();

@@ -63,11 +63,16 @@
     <div class="details-row">
       <section class="panel standings-panel" aria-label="Standings">
         <input type="text" class="rider-search" id="riderSearch" placeholder="Search riders" aria-label="Search riders">
-        <div class="compare-hint">Click rider to compare (max 4)</div>
-        <div class="comparison-panel hidden" id="comparisonPanel"></div>
         <div class="standings-table" id="standings">Loading...</div>
       </section>
       <section class="panel chart-panel" aria-label="Power and heart rate">
+        <div class="chart-legend-row">
+          <div class="chart-legend" id="chartLegend" role="list" aria-label="Riders on chart"></div>
+          <div class="line-key" aria-hidden="true">
+            <span class="line-sample"></span>Power
+            <span class="line-sample dashed"></span>Heart rate
+          </div>
+        </div>
         <div class="chart-container">
           <canvas id="chart" role="img" aria-label="Power and heart rate chart"></canvas>
         </div>
