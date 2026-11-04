@@ -29,6 +29,9 @@ const {
   getValueAtDistance,
   isSyncStatusForEvent,
   isSyncStatusStale,
+  buildRaceKey,
+  summarizeSyncedRaces,
+  buildReplayControlState,
   classifyAnalysisResponse,
   debounce,
   throttle,
@@ -842,6 +845,163 @@ describe('isSyncStatusStale', () => {
   test('handles missing status', () => {
     expect(isSyncStatusStale(null, now, maxAgeMs)).toBe(false);
     expect(isSyncStatusStale(undefined, now, maxAgeMs)).toBe(false);
+  });
+});
+
+describe('buildRaceKey', () => {
+  test('joins event ID and category', () => {
+    expect(buildRaceKey('123', 'A')).toBe('123_A');
+    expect(buildRaceKey('123', 'ALL')).toBe('123_ALL');
+  });
+
+  test('uses the event ID alone without a category', () => {
+    expect(buildRaceKey('123', null)).toBe('123');
+    expect(buildRaceKey('123', undefined)).toBe('123');
+  });
+});
+
+describe('summarizeSyncedRaces', () => {
+  test('keeps rider count and sync progress per race', () => {
+    const syncedRaces = {
+      '123_A': { riders: [{}, {}, {}], syncInProgress: false, eventName: 'Race' },
+      '123_B': { riders: [{}], syncInProgress: true },
+    };
+
+    expect(summarizeSyncedRaces(syncedRaces)).toEqual({
+      '123_A': { riderCount: 3, syncInProgress: false },
+      '123_B': { riderCount: 1, syncInProgress: true },
+    });
+  });
+
+  test('handles races without riders', () => {
+    expect(summarizeSyncedRaces({ 123: {} })).toEqual({ 123: { riderCount: 0, syncInProgress: false } });
+    expect(summarizeSyncedRaces({ 123: null })).toEqual({ 123: { riderCount: 0, syncInProgress: false } });
+  });
+
+  test('returns an empty object without races', () => {
+    expect(summarizeSyncedRaces(undefined)).toEqual({});
+    expect(summarizeSyncedRaces(null)).toEqual({});
+    expect(summarizeSyncedRaces({})).toEqual({});
+  });
+});
+
+describe('buildReplayControlState', () => {
+  const now = Date.parse('2026-01-01T12:00:00.000Z');
+  const maxAgeMs = 2 * 60 * 1000;
+  const raceKey = '123_A';
+  const freshStatus = fields => ({
+    eventId: '123',
+    raceKey,
+    updatedAt: new Date(now - 1000).toISOString(),
+    ...fields,
+  });
+  const build = (overrides = {}) => buildReplayControlState({
+    syncStatus: null,
+    raceSummary: undefined,
+    raceKey,
+    now,
+    maxAgeMs,
+    ...overrides,
+  });
+
+  test('offers a sync when the race is not synced', () => {
+    expect(build()).toEqual({
+      kind: 'idle',
+      buttonLabel: 'Replay race',
+      progress: null,
+      link: null,
+      statusText: '',
+      isError: false,
+    });
+  });
+
+  test('offers the replay and a re-sync when the race is synced', () => {
+    expect(build({ raceSummary: { riderCount: 46, syncInProgress: false } })).toEqual({
+      kind: 'synced',
+      buttonLabel: 'Watch replay',
+      progress: null,
+      link: 'resync',
+      statusText: '46 riders synced',
+      isError: false,
+    });
+  });
+
+  test('marks a synced race whose sync did not finish', () => {
+    const state = build({ raceSummary: { riderCount: 12, syncInProgress: true } });
+    expect(state.kind).toBe('synced');
+    expect(state.statusText).toBe('12 riders synced, sync incomplete');
+  });
+
+  test('shows a starting sync as syncing with empty progress', () => {
+    expect(build({ syncStatus: freshStatus({ status: 'starting' }) })).toEqual({
+      kind: 'syncing',
+      buttonLabel: 'Syncing',
+      progress: 0,
+      link: 'cancel',
+      statusText: 'Preparing riders',
+      isError: false,
+    });
+  });
+
+  test('shows sync progress with the current rider', () => {
+    const syncStatus = freshStatus({
+      status: 'syncing',
+      current: 12,
+      total: 46,
+      riderName: 'Jane Doe',
+      riderPosition: 7,
+    });
+
+    expect(build({ syncStatus, raceSummary: { riderCount: 11, syncInProgress: true } })).toEqual({
+      kind: 'syncing',
+      buttonLabel: 'Syncing 12/46',
+      progress: 26,
+      link: 'cancel',
+      statusText: '#7 Jane Doe',
+      isError: false,
+    });
+  });
+
+  test('keeps progress within bounds', () => {
+    expect(build({ syncStatus: freshStatus({ status: 'syncing', current: 3, total: 0 }) }).progress).toBe(0);
+    expect(build({ syncStatus: freshStatus({ status: 'syncing', current: 9, total: 4 }) }).progress).toBe(100);
+    expect(build({ syncStatus: freshStatus({ status: 'syncing', current: 4, total: 4 }) }).statusText).toBe('');
+  });
+
+  test('offers a retry with the error text after a failed sync', () => {
+    const syncStatus = freshStatus({ status: 'error', error: 'Log in to ZwiftPower and try again.' });
+
+    expect(build({ syncStatus, raceSummary: { riderCount: 5, syncInProgress: false } })).toEqual({
+      kind: 'error',
+      buttonLabel: 'Retry',
+      progress: null,
+      link: null,
+      statusText: 'Log in to ZwiftPower and try again.',
+      isError: true,
+    });
+  });
+
+  test('falls back to a generic error text', () => {
+    expect(build({ syncStatus: freshStatus({ status: 'error' }) }).statusText).toBe('Sync failed');
+  });
+
+  test('uses the synced race once a sync completes or is cancelled', () => {
+    const raceSummary = { riderCount: 46, syncInProgress: false };
+    expect(build({ syncStatus: freshStatus({ status: 'complete' }), raceSummary }).kind).toBe('synced');
+    expect(build({ syncStatus: freshStatus({ status: 'cancelled' }), raceSummary }).kind).toBe('synced');
+    expect(build({ syncStatus: freshStatus({ status: 'cancelled' }) }).kind).toBe('idle');
+  });
+
+  test('ignores a sync of another category', () => {
+    const syncStatus = freshStatus({ status: 'syncing', current: 1, total: 10, raceKey: '123_B' });
+    expect(build({ syncStatus }).kind).toBe('idle');
+    expect(build({ syncStatus, raceSummary: { riderCount: 3, syncInProgress: false } }).kind).toBe('synced');
+  });
+
+  test('ignores a stale sync status', () => {
+    const updatedAt = new Date(now - maxAgeMs - 1).toISOString();
+    expect(build({ syncStatus: freshStatus({ status: 'syncing', current: 1, total: 10, updatedAt }) }).kind).toBe('idle');
+    expect(build({ syncStatus: freshStatus({ status: 'error', error: 'Boom', updatedAt }) }).kind).toBe('idle');
   });
 });
 
