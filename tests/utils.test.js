@@ -54,6 +54,9 @@ const {
   advancePlaybackTime,
   calcRaceDuration,
   findWatchedRider,
+  resolveWatchedRider,
+  buildWatchOptions,
+  shortRiderName,
   riderMarkerRole,
   buildRiderStatsText,
   KM_PER_MILE,
@@ -1626,6 +1629,61 @@ describe('findWatchedRider', () => {
   });
 });
 
+describe('resolveWatchedRider', () => {
+  const riders = [
+    { position: 1, zwiftId: '11' },
+    { position: 7, zwiftId: '17', isCurrentUser: true },
+    { position: 3, zwiftId: '13' },
+  ];
+
+  test('keeps the selected rider', () => {
+    expect(resolveWatchedRider(riders, '13').zwiftId).toBe('13');
+  });
+
+  test('falls back to the default when nothing is selected', () => {
+    expect(resolveWatchedRider(riders, null).zwiftId).toBe('17');
+  });
+
+  test('falls back to the default when the selected rider is gone', () => {
+    expect(resolveWatchedRider(riders, '99').zwiftId).toBe('17');
+    expect(resolveWatchedRider([{ position: 4, zwiftId: '14' }, { position: 2, zwiftId: '12' }], '99').zwiftId).toBe('12');
+  });
+
+  test('returns null without riders', () => {
+    expect(resolveWatchedRider([], '11')).toBeNull();
+  });
+});
+
+describe('buildWatchOptions', () => {
+  test('lists riders by position and marks the current user', () => {
+    const riders = [
+      { position: 7, zwiftId: '17', name: 'Vitalii E', isCurrentUser: true },
+      { position: 1, zwiftId: '11', name: 'Anna Lee' },
+      { position: 3, zwiftId: '13', name: 'Martin Rank' },
+    ];
+    expect(buildWatchOptions(riders)).toEqual([
+      { value: '11', label: '#1 Anna Lee' },
+      { value: '13', label: '#3 Martin Rank' },
+      { value: '17', label: '#7 Vitalii E (you)' },
+    ]);
+  });
+
+  test('does not reorder the input', () => {
+    const riders = [{ position: 2, zwiftId: '12', name: 'B' }, { position: 1, zwiftId: '11', name: 'A' }];
+    buildWatchOptions(riders);
+    expect(riders.map(r => r.zwiftId)).toEqual(['12', '11']);
+  });
+});
+
+describe('shortRiderName', () => {
+  test('returns the first word of the name', () => {
+    expect(shortRiderName('Martin Rank')).toBe('Martin');
+    expect(shortRiderName('  Anna   Lee ')).toBe('Anna');
+    expect(shortRiderName('Solo')).toBe('Solo');
+    expect(shortRiderName(undefined)).toBe('');
+  });
+});
+
 describe('riderMarkerRole', () => {
   const context = { watchingPosition: 5, leaderPosition: 1, groupPositions: new Set([4, 5, 6]) };
 
@@ -1659,5 +1717,17 @@ describe('buildRiderStatsText', () => {
 
   test('returns an empty line without data', () => {
     expect(buildRiderStatsText({})).toBe('');
+  });
+
+  test('adds the gap to the watched rider', () => {
+    expect(buildRiderStatsText({ rank: 5, power: 280, gapToLeader: 14, watchedGap: { seconds: 3, ahead: true, name: 'Martin' } }))
+      .toBe('#5 · 280 W · +14s to leader · 3s ahead of Martin');
+    expect(buildRiderStatsText({ rank: 9, power: 250, watchedGap: { seconds: 65, ahead: false, name: 'Martin' } }))
+      .toBe('#9 · 250 W · 1:05 behind Martin');
+  });
+
+  test('hides a zero gap to the watched rider', () => {
+    expect(buildRiderStatsText({ rank: 5, power: 280, watchedGap: { seconds: 0, ahead: true, name: 'Martin' } }))
+      .toBe('#5 · 280 W');
   });
 });

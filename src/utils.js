@@ -30,10 +30,14 @@ function formatTime(seconds) {
  */
 function formatTimeGap(seconds) {
   if (seconds <= 0) return '-';
-  if (seconds < SECONDS_PER_MINUTE) return `+${seconds}s`;
+  return `+${formatGapDuration(seconds)}`;
+}
+
+function formatGapDuration(seconds) {
+  if (seconds < SECONDS_PER_MINUTE) return `${seconds}s`;
   const mins = Math.floor(seconds / SECONDS_PER_MINUTE);
   const secs = seconds % SECONDS_PER_MINUTE;
-  return `+${mins}:${String(secs).padStart(2, '0')}`;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
 /**
@@ -796,6 +800,23 @@ function findWatchedRider(riders) {
     riders.reduce((best, rider) => (!best || rider.position < best.position ? rider : best), null);
 }
 
+function resolveWatchedRider(riders, selectedId) {
+  return riders.find(rider => rider.zwiftId === selectedId) || findWatchedRider(riders);
+}
+
+function buildWatchOptions(riders) {
+  return [...riders]
+    .sort((a, b) => a.position - b.position)
+    .map(rider => ({
+      value: rider.zwiftId,
+      label: `#${rider.position} ${rider.name}${rider.isCurrentUser ? ' (you)' : ''}`,
+    }));
+}
+
+function shortRiderName(name) {
+  return String(name ?? '').trim().split(/\s+/)[0];
+}
+
 function riderMarkerRole(position, { watchingPosition, leaderPosition, groupPositions }) {
   if (position === watchingPosition) return 'you';
   if (position === leaderPosition) return 'leader';
@@ -806,13 +827,20 @@ function formatGapTo(seconds, target) {
   return seconds > 0 ? `${formatTimeGap(seconds)} to ${target}` : null;
 }
 
-function buildRiderStatsText({ rank, power, leaderPower, gapToLeader, gapToGroup }) {
+function formatWatchedGap(watchedGap) {
+  if (!(watchedGap?.seconds > 0)) return null;
+  const direction = watchedGap.ahead ? 'ahead of' : 'behind';
+  return `${formatGapDuration(watchedGap.seconds)} ${direction} ${watchedGap.name}`;
+}
+
+function buildRiderStatsText({ rank, power, leaderPower, gapToLeader, gapToGroup, watchedGap }) {
   return [
     rank > 0 ? `#${rank}` : null,
     Number.isFinite(power) ? `${power} W` : null,
     Number.isFinite(leaderPower) ? `leader ${leaderPower} W` : null,
     formatGapTo(gapToLeader, 'leader'),
     formatGapTo(gapToGroup, 'group'),
+    formatWatchedGap(watchedGap),
   ].filter(Boolean).join(STATS_SEPARATOR);
 }
 
@@ -872,6 +900,9 @@ if (typeof module !== 'undefined' && module.exports) {
     advancePlaybackTime,
     calcRaceDuration,
     findWatchedRider,
+    resolveWatchedRider,
+    buildWatchOptions,
+    shortRiderName,
     riderMarkerRole,
     buildRiderStatsText,
     // Constants

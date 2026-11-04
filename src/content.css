@@ -132,6 +132,7 @@
 
 .zp-replay-dot {
   outline: none;
+  cursor: pointer;
   pointer-events: auto;
 }
 
@@ -337,4 +338,37 @@
   stroke-width: 3px;
   stroke-linejoin: round;
   pointer-events: none;
+}
+
+.zp-replay-bar .zp-replay-watch {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  color: #57606a;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.zp-replay-bar .zp-replay-watch-select {
+  width: auto;
+  max-width: 240px;
+  min-width: 0;
+  height: auto;
+  margin: 0;
+  padding: 2px 4px;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  background: #fff;
+  color: #1f2328;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.zp-replay-bar .zp-replay-watch-select:focus-visible {
+  outline: 2px solid rgba(31, 111, 235, 0.4);
+  outline-offset: 2px;
 }

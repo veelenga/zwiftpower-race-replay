@@ -55,6 +55,9 @@ const sharedUtils = [
   'advancePlaybackTime',
   'calcRaceDuration',
   'findWatchedRider',
+  'resolveWatchedRider',
+  'buildWatchOptions',
+  'shortRiderName',
   'riderMarkerRole',
   'buildRiderStatsText',
 ];

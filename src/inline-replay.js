@@ -23,6 +23,7 @@ const inlineReplay = {
   raceKey: null,
   loadId: 0,
   riders: [],
+  selectedId: null,
   watchingPosition: null,
   sampleInterval: 1,
   courseKm: 0,
@@ -172,11 +173,25 @@ function handleInlineKeydown(event) {
   run(action);
 }
 
+function handleDotClick(event) {
+  const zwiftId = dotIdFrom(event.target);
+  if (zwiftId) selectWatchedRider(zwiftId);
+}
+
+function handleDotKeydown(event) {
+  const zwiftId = event.key === 'Enter' ? dotIdFrom(event.target) : null;
+  if (!zwiftId) return;
+  event.preventDefault();
+  selectWatchedRider(zwiftId);
+}
+
 function createInlineLayer() {
   const layer = createSvgElement('svg', 'zp-replay-layer');
   layer.setAttribute('role', 'group');
   layer.setAttribute('aria-label', 'Race replay riders');
   layer.addEventListener('keydown', handleInlineKeydown);
+  layer.addEventListener('keydown', handleDotKeydown);
+  layer.addEventListener('click', handleDotClick);
   layer.addEventListener('mouseover', event => hoverInlineDot(dotIdFrom(event.target)));
   layer.addEventListener('mouseout', event => hoverInlineDot(dotIdFrom(event.relatedTarget)));
   layer.addEventListener('focusin', event => hoverInlineDot(dotIdFrom(event.target)));
@@ -240,6 +255,16 @@ function createInlineSpeedButtons() {
   return { element, buttons };
 }
 
+function createWatchSelect() {
+  const element = createControlElement('label', 'zp-replay-watch');
+  const caption = createControlElement('span', 'zp-replay-watch-caption');
+  const select = createControlElement('select', 'zp-replay-watch-select');
+  caption.textContent = 'Watching';
+  select.addEventListener('change', () => selectWatchedRider(select.value));
+  element.append(caption, select);
+  return { element, select, options: new Map() };
+}
+
 function createInlineBar() {
   const element = createControlElement('div', 'zp-replay-bar');
   const controls = createControlElement('div', 'zp-replay-bar-row');
@@ -248,6 +273,7 @@ function createInlineBar() {
   const time = createTextSlot('span', 'zp-replay-time');
   const scrubber = createInlineScrubber();
   const speeds = createInlineSpeedButtons();
+  const watch = createWatchSelect();
   const stats = createTextSlot('span', 'zp-replay-stats');
   const open = createControlButton('zp-replay-link zp-replay-open', openFullInlineReplay);
 
@@ -257,9 +283,9 @@ function createInlineBar() {
   element.setAttribute('aria-label', 'Race replay');
   element.addEventListener('keydown', handleInlineKeydown);
   controls.append(play, time.element, scrubber, speeds.element);
-  details.append(stats.element, open);
+  details.append(watch.element, stats.element, open);
   element.append(controls, details);
-  return { element, play, time, scrubber, speedButtons: speeds.buttons, stats };
+  return { element, play, time, scrubber, speedButtons: speeds.buttons, watch, stats };
 }
 
 function mountInlineView({ graph, path, plot }) {
@@ -324,7 +350,8 @@ function ensureInlineView() {
 function createRiderDot(rider) {
   const element = createSvgElement('g', INLINE_DOT_CLASS);
   const circle = createSvgElement('circle');
-  element.setAttribute('role', 'img');
+  element.setAttribute('role', 'button');
+  element.setAttribute('tabindex', '0');
   element.setAttribute('aria-label', rider.name);
   element.dataset.zwiftId = rider.zwiftId;
   element.append(circle);
@@ -361,10 +388,18 @@ function addRiderDot(view, rider) {
   return dot;
 }
 
+function findInlineWatchedRider() {
+  return inlineReplay.riders.find(rider => rider.position === inlineReplay.watchingPosition) || null;
+}
+
 function raiseWatchedDot(view) {
-  const watched = inlineReplay.riders.find(rider => rider.position === inlineReplay.watchingPosition);
+  const watched = findInlineWatchedRider();
   const element = watched && view.dots.get(watched.zwiftId).element;
-  if (element && view.layer.lastElementChild !== element) view.layer.append(element);
+  if (!element || view.layer.lastElementChild === element) return;
+
+  const hadFocus = document.activeElement === element;
+  view.layer.append(element);
+  if (hadFocus) element.focus({ preventScroll: true });
 }
 
 function syncInlineDots(view) {
@@ -374,7 +409,7 @@ function syncInlineDots(view) {
   riders.forEach(rider => {
     const dot = view.dots.get(rider.zwiftId) || addRiderDot(view, rider);
     const isWatched = rider.position === watchingPosition;
-    dot.element.setAttribute('tabindex', isWatched ? '0' : '-1');
+    dot.element.setAttribute('aria-pressed', String(isWatched));
     setDotLabel(dot, isWatched ? rider.name : null);
   });
   raiseWatchedDot(view);
@@ -476,6 +511,16 @@ function hoveredStandingIndex(view, snapshot) {
   return snapshot.standings.findIndex(standing => standing.zwiftId === inlineReplay.hoveredId);
 }
 
+function watchedGapFor(index, { standings, you }) {
+  const watchedIndex = standings.indexOf(you);
+  if (watchedIndex < 0 || watchedIndex === index) return null;
+
+  const ahead = index < watchedIndex;
+  const [front, back] = ahead ? [standings[index], you] : [you, standings[index]];
+  const seconds = calcStandingGap(front, back, inlineReplay.time, inlineReplay.sampleInterval);
+  return { seconds, ahead, name: shortRiderName(you.name) };
+}
+
 function renderInlineTooltip(view, snapshot) {
   const { tooltip } = view;
   const index = hoveredStandingIndex(view, snapshot);
@@ -489,6 +534,7 @@ function renderInlineTooltip(view, snapshot) {
     rank: index + 1,
     power: standing.currentPower,
     gapToLeader: calcStandingGap(snapshot.leader, standing, time, sampleInterval),
+    watchedGap: watchedGapFor(index, snapshot),
   }));
 
   const transform = tooltipTransform(view.dots.get(standing.zwiftId), view.geometry);
@@ -544,12 +590,59 @@ function renderInlineSpeed() {
   });
 }
 
-function renderInlineBarSetup(bar) {
-  const watched = inlineReplay.riders.find(rider => rider.position === inlineReplay.watchingPosition);
-  bar.scrubber.max = String(Math.ceil(inlineReplay.maxTime));
+function removeStaleOptions(watch, riderIds) {
+  watch.options.forEach((option, zwiftId) => {
+    if (riderIds.has(zwiftId)) return;
+    option.remove();
+    watch.options.delete(zwiftId);
+  });
+}
+
+function ensureWatchOption(watch, { value, label }) {
+  if (!watch.options.has(value)) {
+    const option = document.createElement('option');
+    option.value = value;
+    watch.options.set(value, option);
+  }
+  const option = watch.options.get(value);
+  if (option.textContent !== label) option.textContent = label;
+  return option;
+}
+
+function syncWatchOptions(watch) {
+  const entries = buildWatchOptions(inlineReplay.riders);
+  removeStaleOptions(watch, new Set(entries.map(entry => entry.value)));
+  entries.forEach((entry, index) => {
+    const option = ensureWatchOption(watch, entry);
+    const current = watch.select.options[index];
+    if (current !== option) watch.select.insertBefore(option, current || null);
+  });
+}
+
+function renderWatchSelection(bar) {
+  const watched = findInlineWatchedRider();
+  syncWatchOptions(bar.watch);
+  bar.watch.select.value = watched ? watched.zwiftId : '';
   bar.stats.element.title = watched ? watched.name : '';
+}
+
+function renderInlineBarSetup(bar) {
+  bar.scrubber.max = String(Math.ceil(inlineReplay.maxTime));
+  renderWatchSelection(bar);
   renderInlinePlayState();
   renderInlineSpeed();
+}
+
+function selectWatchedRider(zwiftId) {
+  const rider = inlineReplay.riders.find(candidate => candidate.zwiftId === zwiftId);
+  if (!rider) return;
+
+  Object.assign(inlineReplay, { selectedId: zwiftId, watchingPosition: rider.position });
+  const { view } = inlineReplay;
+  if (!view) return;
+  syncInlineDots(view);
+  renderWatchSelection(view.bar);
+  renderInlineFrame();
 }
 
 function renderInlineReplay() {
@@ -617,7 +710,7 @@ function applyInlineRace(race) {
     riders,
     sampleInterval,
     maxTime,
-    watchingPosition: findWatchedRider(riders)?.position ?? null,
+    watchingPosition: resolveWatchedRider(riders, inlineReplay.selectedId)?.position ?? null,
     time: Math.min(inlineReplay.time, maxTime),
   });
   renderInlineReplay();
@@ -629,6 +722,7 @@ function resetInlineRace(raceKey) {
     raceKey,
     loadId: inlineReplay.loadId + 1,
     riders: [],
+    selectedId: null,
     time: 0,
     hoveredId: null,
   });
