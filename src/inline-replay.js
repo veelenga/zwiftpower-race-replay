@@ -552,8 +552,12 @@ async function loadInlineRace(raceKey) {
   return raceKey === inlineReplay.raceKey;
 }
 
+function reportInlineError(error) {
+  console.log(`[ZP Replay] Inline replay failed: ${error.message}`);
+}
+
 function refreshInlineReplay(raceKey) {
-  if (raceKey !== inlineReplay.raceKey) loadInlineRace(raceKey);
+  if (raceKey !== inlineReplay.raceKey) loadInlineRace(raceKey).catch(reportInlineError);
   else if (!isInlineViewCurrent(findProfileTarget())) renderInlineReplay();
 }
 
@@ -580,7 +584,7 @@ async function startInlineReplay(raceKey) {
 
 function watchInlineReplay(raceKey) {
   if (!findProfileTarget()) return false;
-  startInlineReplay(raceKey);
+  startInlineReplay(raceKey).catch(reportInlineError);
   return true;
 }
 
