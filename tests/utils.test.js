@@ -42,6 +42,11 @@ const {
   resolveCourseKm,
   distanceToProfileX,
   buildCurveLookup,
+  profileDataAttributes,
+  parseProfileGeometry,
+  mapDistanceToAxisX,
+  classifyAxisDistance,
+  transformPlotBox,
   alignNearEdges,
   computeRaceStandings,
   calcStandingGap,
@@ -1408,6 +1413,102 @@ describe('buildCurveLookup', () => {
     expect(buildCurveLookup([0, NaN, 20], [5, 6, 7])(9)).toBe(5);
     expect(buildCurveLookup([], [])).toBeNull();
     expect(buildCurveLookup([NaN], [1])).toBeNull();
+  });
+});
+
+describe('profileDataAttributes', () => {
+  test('lists the attributes written by the profile bridge', () => {
+    expect(profileDataAttributes()).toEqual([
+      'data-zp-x-min',
+      'data-zp-x-max',
+      'data-zp-plot-left',
+      'data-zp-plot-width',
+      'data-zp-plot-top',
+      'data-zp-plot-height',
+      'data-zp-course-km',
+    ]);
+  });
+});
+
+describe('parseProfileGeometry', () => {
+  const dataset = {
+    zpXMin: '-0.28536',
+    zpXMax: '28.82136',
+    zpPlotLeft: '50',
+    zpPlotWidth: '1540',
+    zpPlotTop: '0',
+    zpPlotHeight: '116',
+    zpCourseKm: '28.536',
+  };
+
+  test('reads the axis range, plot box and course length', () => {
+    expect(parseProfileGeometry(dataset)).toEqual({
+      xMin: -0.28536,
+      xMax: 28.82136,
+      plotLeft: 50,
+      plotWidth: 1540,
+      plotTop: 0,
+      plotHeight: 116,
+      courseKm: 28.536,
+    });
+  });
+
+  test('keeps the axis when the course length is missing', () => {
+    expect(parseProfileGeometry({ ...dataset, zpCourseKm: undefined })).toMatchObject({ xMin: -0.28536, courseKm: null });
+  });
+
+  test('returns null when attributes are missing or invalid', () => {
+    expect(parseProfileGeometry({})).toBeNull();
+    expect(parseProfileGeometry(undefined)).toBeNull();
+    expect(parseProfileGeometry({ ...dataset, zpPlotLeft: undefined })).toBeNull();
+    expect(parseProfileGeometry({ ...dataset, zpXMin: 'abc' })).toBeNull();
+    expect(parseProfileGeometry({ ...dataset, zpXMax: '-1' })).toBeNull();
+    expect(parseProfileGeometry({ ...dataset, zpPlotWidth: '0' })).toBeNull();
+  });
+});
+
+describe('mapDistanceToAxisX', () => {
+  const unzoomed = { xMin: -0.28536, xMax: 28.82136, plotLeft: 50, plotWidth: 1540 };
+  const zoomed = { xMin: 8, xMax: 14, plotLeft: 50, plotWidth: 1540 };
+
+  test('maps the course start inside the axis padding when unzoomed', () => {
+    expect(mapDistanceToAxisX(0, unzoomed)).toBeCloseTo(65.1, 1);
+    expect(mapDistanceToAxisX(28.536, unzoomed)).toBeCloseTo(1574.9, 1);
+  });
+
+  test('maps the visible range onto the full plot when zoomed', () => {
+    expect(mapDistanceToAxisX(8, zoomed)).toBe(50);
+    expect(mapDistanceToAxisX(11, zoomed)).toBe(820);
+    expect(mapDistanceToAxisX(14, zoomed)).toBe(1590);
+  });
+
+  test('extrapolates outside the visible range', () => {
+    expect(mapDistanceToAxisX(5, zoomed)).toBeLessThan(50);
+    expect(mapDistanceToAxisX(20, zoomed)).toBeGreaterThan(1590);
+  });
+});
+
+describe('classifyAxisDistance', () => {
+  const axis = { xMin: 8, xMax: 14 };
+
+  test('splits distances into behind, visible and ahead', () => {
+    expect(classifyAxisDistance(7.9, axis)).toBe('behind');
+    expect(classifyAxisDistance(8, axis)).toBe('visible');
+    expect(classifyAxisDistance(14, axis)).toBe('visible');
+    expect(classifyAxisDistance(14.1, axis)).toBe('ahead');
+  });
+});
+
+describe('transformPlotBox', () => {
+  const box = { plotLeft: 50, plotTop: 0, plotWidth: 1540, plotHeight: 116 };
+
+  test('keeps the box with an identity matrix', () => {
+    expect(transformPlotBox(box, { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 })).toEqual(box);
+  });
+
+  test('applies offset and scale', () => {
+    expect(transformPlotBox(box, { a: 0.5, b: 0, c: 0, d: 2, e: 10, f: 5 }))
+      .toEqual({ plotLeft: 35, plotTop: 5, plotWidth: 770, plotHeight: 232 });
   });
 });
 

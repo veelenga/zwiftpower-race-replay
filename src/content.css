@@ -327,3 +327,14 @@
   flex: 0 0 auto;
   font-size: 12px;
 }
+
+.zp-replay-edge-count {
+  fill: #6a737d;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}

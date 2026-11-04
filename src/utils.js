@@ -683,6 +683,53 @@ function distanceToProfileX(distanceKm, firstX, lastX, courseKm) {
   return lerp(firstX, lastX, clamp(distanceKm / courseKm, 0, 1));
 }
 
+const PROFILE_DATASET_KEYS = {
+  xMin: 'zpXMin',
+  xMax: 'zpXMax',
+  plotLeft: 'zpPlotLeft',
+  plotWidth: 'zpPlotWidth',
+  plotTop: 'zpPlotTop',
+  plotHeight: 'zpPlotHeight',
+  courseKm: 'zpCourseKm',
+};
+const UPPERCASE_LETTER_PATTERN = /[A-Z]/g;
+
+function profileDataAttributes() {
+  return Object.values(PROFILE_DATASET_KEYS)
+    .map(key => `data-${key.replace(UPPERCASE_LETTER_PATTERN, letter => `-${letter.toLowerCase()}`)}`);
+}
+
+function parseProfileGeometry(dataset) {
+  const values = Object.fromEntries(
+    Object.entries(PROFILE_DATASET_KEYS).map(([field, key]) => [field, Number.parseFloat(dataset?.[key])])
+  );
+  const { courseKm, ...axis } = values;
+  const isValid = Object.values(axis).every(Number.isFinite) && axis.xMax > axis.xMin && axis.plotWidth > 0;
+  return isValid ? { ...axis, courseKm: courseKm > 0 ? courseKm : null } : null;
+}
+
+function mapDistanceToAxisX(distanceKm, { xMin, xMax, plotLeft, plotWidth }) {
+  return plotLeft + ((distanceKm - xMin) / (xMax - xMin)) * plotWidth;
+}
+
+function classifyAxisDistance(distanceKm, { xMin, xMax }) {
+  if (distanceKm < xMin) return 'behind';
+  return distanceKm > xMax ? 'ahead' : 'visible';
+}
+
+function transformPlotBox({ plotLeft, plotTop, plotWidth, plotHeight }, { a, b, c, d, e, f }) {
+  const right = plotLeft + plotWidth;
+  const bottom = plotTop + plotHeight;
+  const left = a * plotLeft + c * plotTop + e;
+  const top = b * plotLeft + d * plotTop + f;
+  return {
+    plotLeft: left,
+    plotTop: top,
+    plotWidth: a * right + c * bottom + e - left,
+    plotHeight: b * right + d * bottom + f - top,
+  };
+}
+
 function buildCurveLookup(xs, ys) {
   const order = Array.from(xs, (_, i) => i)
     .filter(i => Number.isFinite(xs[i]) && Number.isFinite(ys[i]))
@@ -813,6 +860,11 @@ if (typeof module !== 'undefined' && module.exports) {
     resolveCourseKm,
     distanceToProfileX,
     buildCurveLookup,
+    profileDataAttributes,
+    parseProfileGeometry,
+    mapDistanceToAxisX,
+    classifyAxisDistance,
+    transformPlotBox,
     alignNearEdges,
     computeRaceStandings,
     calcStandingGap,

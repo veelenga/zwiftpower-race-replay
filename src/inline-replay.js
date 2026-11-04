@@ -13,6 +13,9 @@ const INLINE_TOOLTIP_EDGE_PX = 90;
 const INLINE_TOOLTIP_FLIP_PX = 56;
 const INLINE_TOOLTIP_GAP_PX = 10;
 const INLINE_TOOLTIP_SHIFTS = { start: '0%', middle: '-50%', end: '-100%' };
+const INLINE_EDGE_INSET_PX = 4;
+const INLINE_EDGE_BOTTOM_PX = 6;
+const INLINE_PLOT_ATTRIBUTES = ['x', 'y', 'width', 'height'];
 const INLINE_SPEEDS = [1, 5, 10, 30];
 const INLINE_DEFAULT_SPEED = 10;
 
@@ -81,33 +84,74 @@ function samplePath(path, length, matrix) {
   return { xs, ys };
 }
 
-function measureProfile({ layer, path }) {
-  const layerMatrix = layer.getScreenCTM();
-  const pathMatrix = path.getScreenCTM();
-  const length = path.getTotalLength();
+function measureAxis({ graph, path }, toLayer) {
+  const profile = parseProfileGeometry(graph.dataset);
+  const chartMatrix = path.ownerSVGElement?.getScreenCTM();
+  if (!profile || !chartMatrix) return null;
+  return { ...profile, ...transformPlotBox(profile, toLayer.multiply(chartMatrix)) };
+}
+
+function measureProfile(view) {
+  const layerMatrix = view.layer.getScreenCTM();
+  const pathMatrix = view.path.getScreenCTM();
+  const length = view.path.getTotalLength();
   if (!layerMatrix || !pathMatrix || !(length > 0)) return null;
 
-  const { xs, ys } = samplePath(path, length, layerMatrix.inverse().multiply(pathMatrix));
-  return { firstX: xs[0], lastX: xs[xs.length - 1], curveY: buildCurveLookup(xs, ys) };
+  const toLayer = layerMatrix.inverse();
+  const { xs, ys } = samplePath(view.path, length, toLayer.multiply(pathMatrix));
+  const axis = measureAxis(view, toLayer);
+  const firstX = xs[0];
+  const lastX = xs[xs.length - 1];
+  return {
+    firstX,
+    lastX,
+    minX: axis ? axis.plotLeft : firstX,
+    maxX: axis ? axis.plotLeft + axis.plotWidth : lastX,
+    curveY: buildCurveLookup(xs, ys),
+    axis,
+  };
+}
+
+function updateInlineCourseKm(view) {
+  const profileCourseKm = view.geometry?.axis?.courseKm || view.pageCourseKm;
+  inlineReplay.courseKm = resolveCourseKm(profileCourseKm, inlineReplay.riders);
+}
+
+function positionEdgeCount(edge, x, y) {
+  edge.element.setAttribute('x', String(x));
+  edge.element.setAttribute('y', String(y));
+}
+
+function positionEdgeCounts({ edges, geometry }) {
+  const axis = geometry?.axis;
+  if (!axis) return;
+  const y = axis.plotTop + axis.plotHeight - INLINE_EDGE_BOTTOM_PX;
+  positionEdgeCount(edges.behind, axis.plotLeft + INLINE_EDGE_INSET_PX, y);
+  positionEdgeCount(edges.ahead, axis.plotLeft + axis.plotWidth - INLINE_EDGE_INSET_PX, y);
+}
+
+function updateInlineGeometry(view) {
+  view.geometry = measureProfile(view);
+  updateInlineCourseKm(view);
+  positionEdgeCounts(view);
 }
 
 function refreshInlineGeometry() {
   const { view } = inlineReplay;
   if (!view) return;
-  view.geometry = measureProfile(view);
+  updateInlineGeometry(view);
   renderInlineFrame();
 }
 
-function observeProfileSize(view) {
+function observeProfileChanges(view) {
   const refreshSoon = debounce(refreshInlineGeometry, INLINE_GEOMETRY_DELAY_MS);
   const resizeObserver = new ResizeObserver(() => refreshSoon());
+  const mutationObserver = new MutationObserver(() => refreshSoon());
   resizeObserver.observe(view.graph);
-  view.observers.push(resizeObserver);
-  if (!view.plot) return;
-
-  const plotObserver = new MutationObserver(() => refreshSoon());
-  plotObserver.observe(view.plot, { attributes: true, attributeFilter: ['x', 'y', 'width', 'height'] });
-  view.observers.push(plotObserver);
+  mutationObserver.observe(view.graph, { attributes: true, attributeFilter: profileDataAttributes() });
+  mutationObserver.observe(view.path, { attributes: true, attributeFilter: ['d'] });
+  if (view.plot) mutationObserver.observe(view.plot, { attributes: true, attributeFilter: INLINE_PLOT_ATTRIBUTES });
+  view.observers.push(resizeObserver, mutationObserver);
 }
 
 function dotIdFrom(target) {
@@ -138,6 +182,29 @@ function createInlineLayer() {
   layer.addEventListener('focusin', event => hoverInlineDot(dotIdFrom(event.target)));
   layer.addEventListener('focusout', event => hoverInlineDot(dotIdFrom(event.relatedTarget)));
   return layer;
+}
+
+function setSvgVisible(item, visible) {
+  if (item.visible === visible) return;
+  item.visible = visible;
+  if (visible) item.element.removeAttribute('display');
+  else item.element.setAttribute('display', 'none');
+}
+
+function createEdgeCount(side, anchor) {
+  const element = createSvgElement('text', `zp-replay-edge-count zp-replay-edge-count-${side}`);
+  const text = document.createTextNode('');
+  const edge = { element, text, visible: true };
+  element.setAttribute('text-anchor', anchor);
+  element.append(text);
+  setSvgVisible(edge, false);
+  return edge;
+}
+
+function createEdgeCounts(layer) {
+  const edges = { behind: createEdgeCount('behind', 'start'), ahead: createEdgeCount('ahead', 'end') };
+  layer.append(edges.behind.element, edges.ahead.element);
+  return edges;
 }
 
 function createInlineTooltip() {
@@ -196,11 +263,13 @@ function createInlineBar() {
 }
 
 function mountInlineView({ graph, path, plot }) {
+  const layer = createInlineLayer();
   const view = {
     graph,
     path,
     plot,
-    layer: createInlineLayer(),
+    layer,
+    edges: createEdgeCounts(layer),
     tooltip: createInlineTooltip(),
     bar: createInlineBar(),
     dots: new Map(),
@@ -212,8 +281,8 @@ function mountInlineView({ graph, path, plot }) {
   graph.classList.add(INLINE_HOST_CLASS);
   graph.append(view.layer, view.tooltip.element);
   graph.after(view.bar.element);
-  view.geometry = measureProfile(view);
-  observeProfileSize(view);
+  updateInlineGeometry(view);
+  observeProfileChanges(view);
   inlineReplay.view = view;
 }
 
@@ -259,7 +328,7 @@ function createRiderDot(rider) {
   element.setAttribute('aria-label', rider.name);
   element.dataset.zwiftId = rider.zwiftId;
   element.append(circle);
-  return { element, circle, label: null, role: null, transform: null, anchor: null, x: 0, y: 0 };
+  return { element, circle, label: null, role: null, transform: null, anchor: null, visible: true, x: 0, y: 0 };
 }
 
 function setDotLabel(dot, name) {
@@ -329,10 +398,18 @@ function computeInlineSnapshot() {
   };
 }
 
-function standingX(standing, geometry) {
+function standingCourseKm(standing) {
   const { courseKm } = inlineReplay;
-  const distanceKm = standing.finished ? courseKm : standing.currentDistance;
-  return distanceToProfileX(distanceKm, geometry.firstX, geometry.lastX, courseKm);
+  return standing.finished ? courseKm : clamp(standing.currentDistance, 0, courseKm);
+}
+
+function placeStanding(standing, geometry) {
+  const distanceKm = standingCourseKm(standing);
+  const { axis } = geometry;
+  if (!axis) {
+    return { side: 'visible', x: distanceToProfileX(distanceKm, geometry.firstX, geometry.lastX, inlineReplay.courseKm) };
+  }
+  return { side: classifyAxisDistance(distanceKm, axis), x: mapDistanceToAxisX(distanceKm, axis) };
 }
 
 function applyDotRole(dot, role) {
@@ -343,7 +420,7 @@ function applyDotRole(dot, role) {
 }
 
 function applyLabelAnchor(dot, geometry) {
-  const anchor = alignNearEdges(dot.x, geometry.firstX, geometry.lastX, INLINE_LABEL_EDGE_PX);
+  const anchor = alignNearEdges(dot.x, geometry.minX, geometry.maxX, INLINE_LABEL_EDGE_PX);
   if (dot.anchor === anchor) return;
   dot.anchor = anchor;
   dot.label.setAttribute('text-anchor', anchor);
@@ -359,21 +436,34 @@ function applyDotPosition(dot, x, y, geometry) {
   if (dot.label) applyLabelAnchor(dot, geometry);
 }
 
+function renderEdgeCount(edge, count) {
+  setSvgVisible(edge, count > 0);
+  if (count > 0) setSlotText(edge, `+${count}`);
+}
+
 function renderInlineDots(view, snapshot) {
   const { geometry } = view;
   if (!geometry?.curveY) return;
 
+  const hidden = { behind: 0, ahead: 0 };
   snapshot.standings.forEach(standing => {
     const dot = view.dots.get(standing.zwiftId);
     if (!dot) return;
-    const x = standingX(standing, geometry);
+    const { side, x } = placeStanding(standing, geometry);
+    setSvgVisible(dot, side === 'visible');
+    if (side !== 'visible') {
+      hidden[side]++;
+      return;
+    }
     applyDotRole(dot, riderMarkerRole(standing.position, snapshot.roleContext));
     applyDotPosition(dot, x, geometry.curveY(x), geometry);
   });
+  renderEdgeCount(view.edges.behind, hidden.behind);
+  renderEdgeCount(view.edges.ahead, hidden.ahead);
 }
 
 function tooltipTransform(dot, geometry) {
-  const align = alignNearEdges(dot.x, geometry.firstX, geometry.lastX, INLINE_TOOLTIP_EDGE_PX);
+  const align = alignNearEdges(dot.x, geometry.minX, geometry.maxX, INLINE_TOOLTIP_EDGE_PX);
   const shiftY = dot.y < INLINE_TOOLTIP_FLIP_PX
     ? `${INLINE_TOOLTIP_GAP_PX}px`
     : `calc(-100% - ${INLINE_TOOLTIP_GAP_PX}px)`;
@@ -382,7 +472,7 @@ function tooltipTransform(dot, geometry) {
 
 function hoveredStandingIndex(view, snapshot) {
   const dot = view.dots.get(inlineReplay.hoveredId);
-  if (!dot?.transform || !view.geometry) return -1;
+  if (!dot?.transform || !dot.visible || !view.geometry) return -1;
   return snapshot.standings.findIndex(standing => standing.zwiftId === inlineReplay.hoveredId);
 }
 
@@ -467,7 +557,7 @@ function renderInlineReplay() {
 
   const { view } = inlineReplay;
   syncInlineDots(view);
-  inlineReplay.courseKm = resolveCourseKm(view.pageCourseKm, inlineReplay.riders);
+  updateInlineCourseKm(view);
   renderInlineBarSetup(view.bar);
   renderInlineFrame();
 }
