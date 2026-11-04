@@ -704,7 +704,16 @@ function transformPlotBox({ plotLeft, plotTop, plotWidth, plotHeight }, { a, b, 
   };
 }
 
+function isSortedCurve(xs, ys) {
+  for (let i = 0; i < xs.length; i++) {
+    if (!Number.isFinite(xs[i]) || !Number.isFinite(ys[i]) || xs[i] < xs[i - 1]) return false;
+  }
+  return xs.length > 0;
+}
+
 function buildCurveLookup(xs, ys) {
+  if (isSortedCurve(xs, ys)) return x => ys[findClosestIndex(xs, x)];
+
   const order = Array.from(xs, (_, i) => i)
     .filter(i => Number.isFinite(xs[i]) && Number.isFinite(ys[i]))
     .sort((a, b) => xs[a] - xs[b]);

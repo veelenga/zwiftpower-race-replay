@@ -1378,6 +1378,13 @@ describe('buildCurveLookup', () => {
     expect(curveY(100)).toBe(40);
   });
 
+  test('handles ascending samples with repeated x', () => {
+    const curveY = buildCurveLookup([0, 10, 10, 20], [100, 80, 70, 60]);
+    expect(curveY(0)).toBe(100);
+    expect(curveY(19)).toBe(60);
+    expect([80, 70]).toContain(curveY(10));
+  });
+
   test('sorts samples that are not in x order', () => {
     const curveY = buildCurveLookup([20, 0, 10], [60, 100, 80]);
     expect(curveY(1)).toBe(100);

@@ -5,7 +5,6 @@ const INLINE_SVG_NS = 'http://www.w3.org/2000/svg';
 const INLINE_HOST_CLASS = 'zp-replay-host';
 const INLINE_DOT_CLASS = 'zp-replay-dot';
 const INLINE_DOT_RADII = { you: 6.5, leader: 5, group: 4.5, muted: 3.5 };
-const INLINE_MAX_PATH_SAMPLES = 3000;
 const INLINE_GEOMETRY_DELAY_MS = 100;
 const INLINE_LABEL_OFFSET_PX = 11;
 const INLINE_LABEL_EDGE_PX = 80;
@@ -75,8 +74,8 @@ function readProfile(graph) {
   return parseProfileGeometry(parseJsonOrUndefined(graph.getAttribute(INLINE_PROFILE_ATTRIBUTE)));
 }
 
-function samplePath(path, length, matrix) {
-  const count = clamp(Math.ceil(length), 2, INLINE_MAX_PATH_SAMPLES);
+function samplePath(path, length, matrix, maxSamples) {
+  const count = clamp(Math.ceil(length), 2, Math.max(Math.ceil(maxSamples), 2));
   const xs = new Array(count);
   const ys = new Array(count);
   for (let i = 0; i < count; i++) {
@@ -112,8 +111,9 @@ function measureProfile(view) {
   if (!layerMatrix || !pathMatrix || !(length > 0)) return null;
 
   const toLayer = layerMatrix.inverse();
-  const samples = samplePath(view.path, length, toLayer.multiply(pathMatrix));
   const profile = readProfile(view.graph);
+  const plotWidth = profile ? profile.plotWidth : view.graph.clientWidth;
+  const samples = samplePath(view.path, length, toLayer.multiply(pathMatrix), plotWidth);
   const courseKm = resolveCourseKm(profile?.courseKm, inlineReplay.riders);
   const axis = (profile && chartAxis(profile, view.path, toLayer)) || endpointAxis(samples, courseKm);
   return { curveY: buildCurveLookup(samples.xs, samples.ys), axis: { ...axis, courseKm } };
