@@ -33,6 +33,7 @@ const {
   summarizeSyncedRaces,
   buildReplayControlState,
   classifyAnalysisResponse,
+  parseJsonOrUndefined,
   debounce,
   throttle,
   sampleChartWindow,
@@ -42,7 +43,6 @@ const {
   resolveCourseKm,
   distanceToProfileX,
   buildCurveLookup,
-  profileDataAttributes,
   parseProfileGeometry,
   mapDistanceToAxisX,
   classifyAxisDistance,
@@ -1090,6 +1090,14 @@ describe('classifyAnalysisResponse', () => {
   });
 });
 
+describe('parseJsonOrUndefined', () => {
+  test('parses valid JSON and returns undefined otherwise', () => {
+    expect(parseJsonOrUndefined('{"a":1}')).toEqual({ a: 1 });
+    expect(parseJsonOrUndefined('not json')).toBeUndefined();
+    expect(parseJsonOrUndefined(null)).toBeNull();
+  });
+});
+
 describe('debounce', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
@@ -1419,33 +1427,19 @@ describe('buildCurveLookup', () => {
   });
 });
 
-describe('profileDataAttributes', () => {
-  test('lists the attributes written by the profile bridge', () => {
-    expect(profileDataAttributes()).toEqual([
-      'data-zp-x-min',
-      'data-zp-x-max',
-      'data-zp-plot-left',
-      'data-zp-plot-width',
-      'data-zp-plot-top',
-      'data-zp-plot-height',
-      'data-zp-course-km',
-    ]);
-  });
-});
-
 describe('parseProfileGeometry', () => {
-  const dataset = {
-    zpXMin: '-0.28536',
-    zpXMax: '28.82136',
-    zpPlotLeft: '50',
-    zpPlotWidth: '1540',
-    zpPlotTop: '0',
-    zpPlotHeight: '116',
-    zpCourseKm: '28.536',
+  const profile = {
+    xMin: -0.28536,
+    xMax: 28.82136,
+    plotLeft: 50,
+    plotWidth: 1540,
+    plotTop: 0,
+    plotHeight: 116,
+    courseKm: 28.536,
   };
 
   test('reads the axis range, plot box and course length', () => {
-    expect(parseProfileGeometry(dataset)).toEqual({
+    expect(parseProfileGeometry(profile)).toEqual({
       xMin: -0.28536,
       xMax: 28.82136,
       plotLeft: 50,
@@ -1457,16 +1451,21 @@ describe('parseProfileGeometry', () => {
   });
 
   test('keeps the axis when the course length is missing', () => {
-    expect(parseProfileGeometry({ ...dataset, zpCourseKm: undefined })).toMatchObject({ xMin: -0.28536, courseKm: null });
+    expect(parseProfileGeometry({ ...profile, courseKm: undefined })).toMatchObject({ xMin: -0.28536, courseKm: null });
   });
 
-  test('returns null when attributes are missing or invalid', () => {
+  test('drops unknown fields', () => {
+    expect(parseProfileGeometry({ ...profile, extra: 1 })).not.toHaveProperty('extra');
+  });
+
+  test('returns null when fields are missing or invalid', () => {
     expect(parseProfileGeometry({})).toBeNull();
     expect(parseProfileGeometry(undefined)).toBeNull();
-    expect(parseProfileGeometry({ ...dataset, zpPlotLeft: undefined })).toBeNull();
-    expect(parseProfileGeometry({ ...dataset, zpXMin: 'abc' })).toBeNull();
-    expect(parseProfileGeometry({ ...dataset, zpXMax: '-1' })).toBeNull();
-    expect(parseProfileGeometry({ ...dataset, zpPlotWidth: '0' })).toBeNull();
+    expect(parseProfileGeometry(null)).toBeNull();
+    expect(parseProfileGeometry({ ...profile, plotLeft: undefined })).toBeNull();
+    expect(parseProfileGeometry({ ...profile, xMin: '0' })).toBeNull();
+    expect(parseProfileGeometry({ ...profile, xMax: -1 })).toBeNull();
+    expect(parseProfileGeometry({ ...profile, plotWidth: 0 })).toBeNull();
   });
 });
 

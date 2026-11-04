@@ -15,7 +15,7 @@ const INLINE_TOOLTIP_GAP_PX = 10;
 const INLINE_TOOLTIP_SHIFTS = { start: '0%', middle: '-50%', end: '-100%' };
 const INLINE_EDGE_INSET_PX = 4;
 const INLINE_EDGE_BOTTOM_PX = 6;
-const INLINE_PLOT_ATTRIBUTES = ['x', 'y', 'width', 'height'];
+const INLINE_PROFILE_ATTRIBUTE = 'data-zp-profile';
 const INLINE_SPEEDS = [1, 5, 10, 30];
 const INLINE_DEFAULT_SPEED = 10;
 
@@ -85,8 +85,12 @@ function samplePath(path, length, matrix) {
   return { xs, ys };
 }
 
+function readProfile(graph) {
+  return parseProfileGeometry(parseJsonOrUndefined(graph.getAttribute(INLINE_PROFILE_ATTRIBUTE)));
+}
+
 function measureAxis({ graph, path }, toLayer) {
-  const profile = parseProfileGeometry(graph.dataset);
+  const profile = readProfile(graph);
   const chartMatrix = path.ownerSVGElement?.getScreenCTM();
   if (!profile || !chartMatrix) return null;
   return { ...profile, ...transformPlotBox(profile, toLayer.multiply(chartMatrix)) };
@@ -146,13 +150,10 @@ function refreshInlineGeometry() {
 
 function observeProfileChanges(view) {
   const refreshSoon = debounce(refreshInlineGeometry, INLINE_GEOMETRY_DELAY_MS);
-  const resizeObserver = new ResizeObserver(() => refreshSoon());
-  const mutationObserver = new MutationObserver(() => refreshSoon());
-  resizeObserver.observe(view.graph);
-  mutationObserver.observe(view.graph, { attributes: true, attributeFilter: profileDataAttributes() });
-  mutationObserver.observe(view.path, { attributes: true, attributeFilter: ['d'] });
-  if (view.plot) mutationObserver.observe(view.plot, { attributes: true, attributeFilter: INLINE_PLOT_ATTRIBUTES });
-  view.observers.push(resizeObserver, mutationObserver);
+  const observer = new MutationObserver(() => refreshSoon());
+  observer.observe(view.graph, { attributes: true, attributeFilter: [INLINE_PROFILE_ATTRIBUTE] });
+  observer.observe(view.path, { attributes: true, attributeFilter: ['d'] });
+  view.observers.push(observer);
 }
 
 function dotIdFrom(target) {

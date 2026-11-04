@@ -687,29 +687,13 @@ function distanceToProfileX(distanceKm, firstX, lastX, courseKm) {
   return lerp(firstX, lastX, clamp(distanceKm / courseKm, 0, 1));
 }
 
-const PROFILE_DATASET_KEYS = {
-  xMin: 'zpXMin',
-  xMax: 'zpXMax',
-  plotLeft: 'zpPlotLeft',
-  plotWidth: 'zpPlotWidth',
-  plotTop: 'zpPlotTop',
-  plotHeight: 'zpPlotHeight',
-  courseKm: 'zpCourseKm',
-};
-const UPPERCASE_LETTER_PATTERN = /[A-Z]/g;
+const PROFILE_AXIS_FIELDS = ['xMin', 'xMax', 'plotLeft', 'plotTop', 'plotWidth', 'plotHeight'];
 
-function profileDataAttributes() {
-  return Object.values(PROFILE_DATASET_KEYS)
-    .map(key => `data-${key.replace(UPPERCASE_LETTER_PATTERN, letter => `-${letter.toLowerCase()}`)}`);
-}
-
-function parseProfileGeometry(dataset) {
-  const values = Object.fromEntries(
-    Object.entries(PROFILE_DATASET_KEYS).map(([field, key]) => [field, Number.parseFloat(dataset?.[key])])
-  );
-  const { courseKm, ...axis } = values;
-  const isValid = Object.values(axis).every(Number.isFinite) && axis.xMax > axis.xMin && axis.plotWidth > 0;
-  return isValid ? { ...axis, courseKm: courseKm > 0 ? courseKm : null } : null;
+function parseProfileGeometry(profile) {
+  if (!profile || !PROFILE_AXIS_FIELDS.every(field => Number.isFinite(profile[field]))) return null;
+  const { xMin, xMax, plotLeft, plotTop, plotWidth, plotHeight, courseKm } = profile;
+  if (!(xMax > xMin && plotWidth > 0)) return null;
+  return { xMin, xMax, plotLeft, plotTop, plotWidth, plotHeight, courseKm: courseKm > 0 ? courseKm : null };
 }
 
 function mapDistanceToAxisX(distanceKm, { xMin, xMax, plotLeft, plotWidth }) {
@@ -879,6 +863,7 @@ if (typeof module !== 'undefined' && module.exports) {
     summarizeSyncedRaces,
     buildReplayControlState,
     classifyAnalysisResponse,
+    parseJsonOrUndefined,
     debounce,
     throttle,
     sampleChartWindow,
@@ -888,7 +873,6 @@ if (typeof module !== 'undefined' && module.exports) {
     resolveCourseKm,
     distanceToProfileX,
     buildCurveLookup,
-    profileDataAttributes,
     parseProfileGeometry,
     mapDistanceToAxisX,
     classifyAxisDistance,
