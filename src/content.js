@@ -362,8 +362,7 @@ function beginSync() {
   return currentSyncAbortController.signal;
 }
 
-async function prepareSyncContext() {
-  const eventId = getEventIdFromUrl();
+async function prepareSyncContext({ eventId, raceKey }) {
   if (!eventId) {
     throw new Error('Not on a ZwiftPower event page');
   }
@@ -379,7 +378,6 @@ async function prepareSyncContext() {
 
   const ridersToSync = selectRidersToSync(allRiders, MAX_RIDERS_TO_SYNC);
   const fullEventName = categoryName ? `${eventName} - ${categoryName}` : eventName;
-  const raceKey = buildRaceKey(eventId, categoryId);
 
   const existingRace = await getExistingRaceData(raceKey);
   const existingRiderIds = new Set(existingRace?.riders?.map(r => r.zwiftId) || []);
@@ -483,8 +481,8 @@ async function finishCancelledSync(ctx, riderData, errors) {
   return raceResult;
 }
 
-async function syncRaceData(signal) {
-  const ctx = await prepareSyncContext();
+async function syncRaceData(target, signal) {
+  const ctx = await prepareSyncContext(target);
 
   if (ctx.newRidersToSync.length === 0) {
     await updateSyncStatus(ctx, {
@@ -544,8 +542,8 @@ async function runSync() {
 
   try {
     await updateSyncStatus(target, { status: 'starting' });
-    const data = await syncRaceData(signal);
-    return { success: true, data, cancelled: signal.aborted };
+    const data = await syncRaceData(target, signal);
+    return { success: true, raceKey: target.raceKey, data, cancelled: signal.aborted };
   } catch (error) {
     await updateSyncStatus(target, { status: 'error', error: error.message });
     return { success: false, error: error.message };
@@ -563,17 +561,15 @@ const replayControl = {
   races: {},
 };
 
-const replayViewers = [];
-
 const CONTROL_BUTTON_ACTIONS = {
-  idle: () => startSyncFromControl({ watchWhenDone: true }),
-  error: () => startSyncFromControl({ watchWhenDone: true }),
+  idle: () => startSyncFromControl({ openWhenDone: true }),
+  error: () => startSyncFromControl({ openWhenDone: true }),
   synced: () => watchReplay(replayControl.raceKey),
 };
 
 const CONTROL_LINK_ACTIONS = {
   cancel: () => cancelSyncFromControl(),
-  resync: () => startSyncFromControl({ watchWhenDone: false }),
+  resync: () => startSyncFromControl({ openWhenDone: false }),
 };
 
 function requestOpenReplay(raceKey) {
@@ -582,15 +578,14 @@ function requestOpenReplay(raceKey) {
 }
 
 function watchReplay(raceKey) {
-  const watchedInline = raceKey === replayControl.raceKey && replayViewers.some(viewer => viewer.watch(raceKey));
-  if (!watchedInline) requestOpenReplay(raceKey);
+  if (!globalThis.watchInlineReplay?.(raceKey)) requestOpenReplay(raceKey);
 }
 
-async function startSyncFromControl({ watchWhenDone }) {
+async function startSyncFromControl({ openWhenDone }) {
   replayControl.elements.button.disabled = true;
   const result = await runSync();
-  if (watchWhenDone && result.success && !result.cancelled) {
-    watchReplay(result.data.eventId);
+  if (openWhenDone && result.success && !result.cancelled) {
+    watchReplay(result.raceKey);
   }
 }
 
@@ -694,20 +689,15 @@ function refreshReplayControl() {
   if (categoryChanged || !replayControl.elements.root.isConnected) {
     renderReplayControl();
   }
-  refreshReplayViewers();
+  refreshInlineReplayForControl();
 }
 
-function registerReplayViewer(viewer) {
-  replayViewers.push(viewer);
-  if (replayControl.raceKey) viewer.refresh(replayControl.raceKey);
+function currentReplayRaceKey() {
+  return replayControl.raceKey;
 }
 
-function refreshReplayViewers() {
-  replayViewers.forEach(viewer => viewer.refresh(replayControl.raceKey));
-}
-
-function updateReplayViewerRaces(races) {
-  replayViewers.forEach(viewer => viewer.racesChanged(races));
+function refreshInlineReplayForControl() {
+  globalThis.refreshInlineReplay?.(replayControl.raceKey);
 }
 
 function updateReplayControlData(values) {
@@ -725,7 +715,7 @@ function handleReplayStorageChange(changes, areaName) {
 
   updateReplayControlData(Object.fromEntries(keys.map(key => [key, changes[key].newValue])));
   renderReplayControl();
-  if (SYNCED_RACES_KEY in changes) updateReplayViewerRaces(changes[SYNCED_RACES_KEY].newValue);
+  if (SYNCED_RACES_KEY in changes) globalThis.handleInlineRacesChanged?.(changes[SYNCED_RACES_KEY].newValue);
 }
 
 function watchCategorySwitches() {
@@ -748,7 +738,7 @@ async function initReplayControl() {
   replayControl.elements = createReplayControlElements();
   updateReplayControlData(await chrome.storage.local.get([SYNC_STATUS_KEY, SYNCED_RACES_KEY]));
   renderReplayControl();
-  refreshReplayViewers();
+  refreshInlineReplayForControl();
 
   chrome.storage.onChanged.addListener(handleReplayStorageChange);
   watchCategorySwitches();

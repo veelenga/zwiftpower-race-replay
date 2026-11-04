@@ -65,10 +65,14 @@ const sharedUtils = [
 const contentScriptApi = [
   'createControlElement',
   'createControlButton',
+  'currentReplayRaceKey',
   'getExistingRaceData',
-  'registerReplayViewer',
   'requestOpenReplay',
 ];
+
+const inlineReplayApi = ['refreshInlineReplay', 'handleInlineRacesChanged', 'watchInlineReplay'];
+
+const unusedExceptApi = api => ['error', { varsIgnorePattern: `^(${api.join('|')})$` }];
 
 module.exports = [
   { ignores: ['node_modules/**', 'dist/**', 'src/lib/**'] },
@@ -104,11 +108,14 @@ module.exports = [
     languageOptions: {
       globals: Object.fromEntries(contentScriptApi.map(name => [name, 'readonly'])),
     },
+    rules: {
+      'no-unused-vars': unusedExceptApi(inlineReplayApi),
+    },
   },
   {
     files: ['src/content.js'],
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: `^(${contentScriptApi.join('|')})$` }],
+      'no-unused-vars': unusedExceptApi(contentScriptApi),
     },
   },
   {

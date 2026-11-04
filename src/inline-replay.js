@@ -742,6 +742,7 @@ function reportInlineError(error) {
 }
 
 function refreshInlineReplay(raceKey) {
+  if (!raceKey) return;
   if (raceKey !== inlineReplay.raceKey) loadInlineRace(raceKey).catch(reportInlineError);
   else if (!isInlineViewCurrent(findProfileTarget())) renderInlineReplay();
 }
@@ -773,8 +774,4 @@ function watchInlineReplay(raceKey) {
   return true;
 }
 
-registerReplayViewer({
-  refresh: refreshInlineReplay,
-  racesChanged: handleInlineRacesChanged,
-  watch: watchInlineReplay,
-});
+refreshInlineReplay(currentReplayRaceKey());
