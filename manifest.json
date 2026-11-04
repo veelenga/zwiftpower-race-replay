@@ -6,8 +6,7 @@
   "permissions": [
     "storage",
     "unlimitedStorage",
-    "activeTab",
-    "cookies"
+    "activeTab"
   ],
   "host_permissions": [
     "https://zwiftpower.com/*"
@@ -34,17 +33,5 @@
   ],
   "background": {
     "service_worker": "src/background.js"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "src/replay.html",
-        "src/replay.js",
-        "src/replay.css",
-        "src/utils.js",
-        "src/lib/chart.min.js"
-      ],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }
