@@ -9,6 +9,7 @@ body {
 }
 
 .header {
+  position: relative;
   background: #161b22;
   padding: 10px 16px;
   border-bottom: 1px solid #30363d;
@@ -68,6 +69,68 @@ body {
 
 .rider-selector select:hover { border-color: #58a6ff; }
 .rider-selector select:focus { outline: none; border-color: #58a6ff; }
+
+.icon-btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 50%;
+  color: #c9d1d9;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.icon-btn:hover,
+.icon-btn[aria-expanded="true"] { background: #30363d; border-color: #58a6ff; }
+.icon-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+
+.shortcuts-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 12px;
+  z-index: 900;
+  padding: 12px 14px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(1, 4, 9, 0.6);
+}
+
+.shortcuts-title {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0f6fc;
+}
+
+.shortcuts-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 16px;
+  row-gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.shortcuts-list dt { color: #8b949e; white-space: nowrap; }
+.shortcuts-list dd { color: #c9d1d9; }
+
+kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #c9d1d9;
+  text-align: center;
+}
 
 .viz-area {
   padding: 12px;

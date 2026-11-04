@@ -536,6 +536,59 @@ function sampleChartWindow(riders, time, { windowSeconds, stepSeconds, sampleInt
   return { labels, series };
 }
 
+const SEEK_STEP_SECONDS = 5;
+const SEEK_SHIFT_STEP_SECONDS = 30;
+const REPEATABLE_SHORTCUTS = ['seekBy', 'changeSpeed'];
+const TEXT_ENTRY_TAGS = ['SELECT', 'TEXTAREA'];
+const NON_TEXT_INPUT_TYPES = ['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file'];
+const ACTIVATABLE_TAGS = ['BUTTON', 'A', 'SUMMARY'];
+const DIGIT_KEY_PATTERN = /^[0-9]$/;
+
+function isTextEntryTarget(target) {
+  if (!target) return false;
+  if (TEXT_ENTRY_TAGS.includes(target.tagName)) return true;
+  if (target.tagName === 'INPUT') return !NON_TEXT_INPUT_TYPES.includes(target.type);
+  return target.isContentEditable === true;
+}
+
+function isActivatableTarget(target) {
+  return Boolean(target) && ACTIVATABLE_TAGS.includes(target.tagName);
+}
+
+function shortcutForKey(key, shiftKey) {
+  if (DIGIT_KEY_PATTERN.test(key)) return { type: 'seekFraction', fraction: Number(key) / 10 };
+
+  const seekStep = shiftKey ? SEEK_SHIFT_STEP_SECONDS : SEEK_STEP_SECONDS;
+  switch (key) {
+    case ' ': return { type: 'togglePlay' };
+    case 'ArrowLeft': return { type: 'seekBy', seconds: -seekStep };
+    case 'ArrowRight': return { type: 'seekBy', seconds: seekStep };
+    case 'ArrowUp': return { type: 'changeSpeed', step: 1 };
+    case 'ArrowDown': return { type: 'changeSpeed', step: -1 };
+    case 'r':
+    case 'R': return { type: 'resetZoom' };
+    case '/': return { type: 'focusSearch' };
+    case '?': return { type: 'toggleHelp' };
+    default: return null;
+  }
+}
+
+function resolveShortcut({ key, shiftKey = false, ctrlKey = false, metaKey = false, altKey = false, repeat = false, target = null }) {
+  if (key === 'Escape') return { type: 'escape' };
+  if (ctrlKey || metaKey || altKey || isTextEntryTarget(target)) return null;
+  if (key === ' ' && isActivatableTarget(target)) return null;
+
+  const action = shortcutForKey(key, shiftKey);
+  if (!action || (repeat && !REPEATABLE_SHORTCUTS.includes(action.type))) return null;
+  return action;
+}
+
+function stepSpeed(speeds, current, step) {
+  const index = speeds.indexOf(current);
+  if (index < 0) return current;
+  return speeds[clamp(index + step, 0, speeds.length - 1)];
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -571,6 +624,8 @@ if (typeof module !== 'undefined' && module.exports) {
     debounce,
     throttle,
     sampleChartWindow,
+    resolveShortcut,
+    stepSpeed,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,
@@ -583,5 +638,7 @@ if (typeof module !== 'undefined' && module.exports) {
     HASH_CATEGORY_PATTERN,
     URL_CATEGORY_PATTERN,
     EVENT_ID_PATTERN,
+    SEEK_STEP_SECONDS,
+    SEEK_SHIFT_STEP_SECONDS,
   };
 }

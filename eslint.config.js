@@ -34,6 +34,8 @@ const sharedUtils = [
   'debounce',
   'throttle',
   'sampleChartWindow',
+  'resolveShortcut',
+  'stepSpeed',
 ];
 
 module.exports = [

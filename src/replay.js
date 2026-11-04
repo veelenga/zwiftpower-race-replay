@@ -87,6 +87,8 @@ const elements = {
   speedControl: document.getElementById('speedControl'),
   speedButtons: [...document.querySelectorAll('#speedControl [data-speed]')],
   zoomResetBtn: document.getElementById('zoomResetBtn'),
+  shortcutsBtn: document.getElementById('shortcutsBtn'),
+  shortcutsPanel: document.getElementById('shortcutsPanel'),
   standings: document.getElementById('standings'),
   riderSearch: document.getElementById('riderSearch'),
   chartLegend: document.getElementById('chartLegend'),
@@ -96,6 +98,8 @@ const elements = {
   errorOverlay: document.getElementById('errorOverlay'),
   errorText: document.getElementById('errorText'),
 };
+
+const PLAYBACK_SPEEDS = elements.speedButtons.map(btn => Number(btn.dataset.speed));
 
 function shortName(rider) {
   return rider.name.split(' ')[0];
@@ -132,6 +136,12 @@ function toggleCompareRider(pos) {
   } else if (compareRiders.length < MAX_COMPARE_RIDERS) {
     compareRiders.push(pos);
   }
+  updateNow();
+}
+
+function clearComparison() {
+  if (compareRiders.length === 0) return;
+  compareRiders = [];
   updateNow();
 }
 
@@ -866,6 +876,63 @@ function hideProfileCursor() {
   elements.cursorInfo.style.display = 'none';
 }
 
+function isShortcutsPanelOpen() {
+  return elements.shortcutsBtn.getAttribute('aria-expanded') === 'true';
+}
+
+function setShortcutsPanelOpen(open) {
+  elements.shortcutsPanel.classList.toggle('hidden', !open);
+  elements.shortcutsBtn.setAttribute('aria-expanded', String(open));
+}
+
+function toggleShortcutsPanel() {
+  setShortcutsPanelOpen(!isShortcutsPanelOpen());
+}
+
+function closeShortcutsOnOutsideClick(e) {
+  if (!isShortcutsPanelOpen() || e.target.closest('#shortcutsPanel, #shortcutsBtn')) return;
+  setShortcutsPanelOpen(false);
+}
+
+function handleEscape() {
+  if (isShortcutsPanelOpen()) {
+    setShortcutsPanelOpen(false);
+    return;
+  }
+  clearComparison();
+  elements.riderSearch.blur();
+}
+
+const shortcutHandlers = {
+  togglePlay: () => togglePlay(),
+  seekBy: ({ seconds }) => seekTo(currentTime + seconds),
+  seekFraction: ({ fraction }) => seekTo(maxTime * fraction),
+  changeSpeed: ({ step }) => setPlaybackSpeed(stepSpeed(PLAYBACK_SPEEDS, playbackSpeed, step)),
+  resetZoom: () => resetZoom(),
+  focusSearch: () => elements.riderSearch.focus(),
+  escape: () => handleEscape(),
+  toggleHelp: () => toggleShortcutsPanel(),
+};
+
+function handleShortcutKey(e) {
+  const action = resolveShortcut(e);
+  if (!action) return;
+  e.preventDefault();
+  shortcutHandlers[action.type](action);
+}
+
+function releasePointerFocus(e) {
+  const button = e.target.closest('button');
+  if (button && e.detail > 0) button.blur();
+}
+
+function initKeyboardControls() {
+  document.addEventListener('keydown', handleShortcutKey);
+  document.addEventListener('click', releasePointerFocus);
+  document.addEventListener('click', closeShortcutsOnOutsideClick);
+  elements.shortcutsBtn.addEventListener('click', toggleShortcutsPanel);
+}
+
 function initPlayerControls() {
   elements.playBtn.addEventListener('click', togglePlay);
   elements.timeSlider.addEventListener('input', (e) => seekTo(Number(e.target.value)));
@@ -888,6 +955,7 @@ function initProfileInteractions() {
 function initEventListeners() {
   initPlayerControls();
   initProfileInteractions();
+  initKeyboardControls();
   elements.riderSelect.addEventListener('change', (e) => selectRider(Number(e.target.value)));
   elements.standings.addEventListener('click', handleStandingsClick);
   elements.chartLegend.addEventListener('click', handleLegendClick);
