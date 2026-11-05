@@ -99,13 +99,9 @@ const elements = {
   errorText: document.getElementById('errorText'),
 };
 
-function shortName(rider) {
-  return rider.name.split(' ')[0];
-}
-
 function getWatchingRiderName() {
   const rider = riders.find(r => r.position === watchingPosition);
-  return rider ? shortName(rider) : 'Rider';
+  return rider ? shortRiderName(rider.name) : 'Rider';
 }
 
 function selectRider(pos) {
@@ -227,7 +223,7 @@ async function loadRaceData() {
     sampleInterval = raceData.riders[0]?.sampleInterval || 1;
     riders = raceData.riders.map(toReplayRider);
 
-    watchingPosition = findWatchedRider(riders)?.position ?? 1;
+    watchingPosition = resolveWatchedRider(riders)?.position ?? 1;
 
     updateMaxTime();
 
@@ -447,7 +443,7 @@ function chartRiders(you, leader) {
 }
 
 function chartDatasets({ rider, color, power, heartRate }) {
-  const name = shortName(rider);
+  const name = shortRiderName(rider.name);
   return [
     { label: `${name} power`, data: power, yAxisID: 'power', borderColor: color, borderWidth: POWER_LINE_WIDTH, fill: false },
     { label: `${name} heart rate`, data: heartRate, yAxisID: 'heartRate', borderColor: color, borderWidth: HR_LINE_WIDTH, borderDash: HR_LINE_DASH, fill: false },
@@ -486,7 +482,7 @@ function formatChartValue(value, unit) {
 
 function chartTooltipRow(entry, index) {
   const row = createElement('div', 'chart-tooltip-row');
-  const name = createElement('span', 'chart-tooltip-name', shortName(entry.rider));
+  const name = createElement('span', 'chart-tooltip-name', shortRiderName(entry.rider.name));
   name.style.color = entry.color;
   row.append(name, ` ${formatChartValue(entry.power[index], 'W')} · ${formatChartValue(entry.heartRate[index], 'bpm')}`);
   return row;
@@ -566,10 +562,6 @@ function renderPlaybackTime(t) {
   elements.timeSlider.style.setProperty('--progress', `${progressPercent}%`);
 }
 
-function gapStatText(seconds, target) {
-  return seconds > 0 ? `${formatTimeGap(seconds)} to ${target}` : null;
-}
-
 function setStat(el, text) {
   el.classList.toggle('hidden', text === null);
   el.textContent = text ?? '';
@@ -584,8 +576,8 @@ function renderStats({ t, standings, groups, you, leader }) {
   setStat(elements.statPosition, `#${rank}`);
   setStat(elements.statPower, `${you?.currentPower || 0} W`);
   setStat(elements.statLeaderPower, `leader ${leader?.currentPower || 0} W`);
-  setStat(elements.statGapToLeader, isChasing ? gapStatText(calcTimeGap(leader, you, t, sampleInterval), 'leader') : null);
-  setStat(elements.statGapToGroup, isChasing ? gapStatText(calcGapToGroupAhead(groups, yourGroupIndex, you, t, sampleInterval), 'group') : null);
+  setStat(elements.statGapToLeader, isChasing ? formatGapTo(calcTimeGap(leader, you, t, sampleInterval), 'leader') : null);
+  setStat(elements.statGapToGroup, isChasing ? formatGapTo(calcGapToGroupAhead(groups, yourGroupIndex, you, t, sampleInterval), 'group') : null);
   elements.statPosition.title = `${watchingName}'s position`;
   elements.statPower.title = `${watchingName}'s power`;
 }

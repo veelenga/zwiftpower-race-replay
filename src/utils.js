@@ -662,24 +662,6 @@ function stepSpeed(speeds, current, step) {
   return speeds[clamp(index + step, 0, speeds.length - 1)];
 }
 
-const STATS_SEPARATOR = ' · ';
-
-function mapDistanceToAxisX(distanceKm, { xMin, xMax, plotLeft, plotWidth }) {
-  if (!(xMax > xMin)) return plotLeft;
-  return plotLeft + ((distanceKm - xMin) / (xMax - xMin)) * plotWidth;
-}
-
-function classifyAxisDistance(distanceKm, { xMin, xMax }) {
-  if (distanceKm < xMin) return 'behind';
-  return distanceKm > xMax ? 'ahead' : 'visible';
-}
-
-function alignNearEdges(x, minX, maxX, marginPx) {
-  if (x - minX < marginPx) return 'start';
-  if (maxX - x < marginPx) return 'end';
-  return 'middle';
-}
-
 function riderStandingAt(rider, time, sampleInterval) {
   const samples = rider.distance || [];
   const lastIndex = samples.length - 1;
@@ -721,17 +703,10 @@ function advancePlaybackTime(time, elapsedMs, speed, maxTime) {
   return clamp(time + (elapsedMs / MS_PER_SECOND) * speed, 0, maxTime);
 }
 
-function calcRaceDuration(riders, sampleInterval = 1) {
-  return Math.max(0, ...riders.map(rider => Math.max((rider.distance?.length || 0) - 1, 0) * sampleInterval));
-}
-
-function findWatchedRider(riders) {
-  return riders.find(rider => rider.isCurrentUser) ||
-    riders.reduce((best, rider) => (!best || rider.position < best.position ? rider : best), null);
-}
-
 function resolveWatchedRider(riders, selectedId) {
-  return riders.find(rider => rider.zwiftId === selectedId) || findWatchedRider(riders);
+  return riders.find(rider => rider.zwiftId === selectedId) ||
+    riders.find(rider => rider.isCurrentUser) ||
+    riders.reduce((best, rider) => (!best || rider.position < best.position ? rider : best), null);
 }
 
 function buildWatchOptions(riders) {
@@ -748,24 +723,8 @@ function shortRiderName(name) {
   return String(name ?? '').trim().split(/\s+/)[0];
 }
 
-function riderMarkerRole(zwiftId, { watchedId, leaderId, groupIds }) {
-  if (zwiftId === watchedId) return 'you';
-  if (zwiftId === leaderId) return 'leader';
-  return groupIds.has(zwiftId) ? 'group' : 'muted';
-}
-
-function isSameSyncedRace(a, b) {
-  return a?.riders?.length === b?.riders?.length && a?.syncedAt === b?.syncedAt;
-}
-
 function formatGapTo(seconds, target) {
   return seconds > 0 ? `${formatTimeGap(seconds)} to ${target}` : null;
-}
-
-function formatWatchedGap(watchedGap) {
-  if (!(watchedGap?.seconds > 0)) return null;
-  const direction = watchedGap.ahead ? 'ahead of' : 'behind';
-  return `${formatGapDuration(watchedGap.seconds)} ${direction} ${watchedGap.name}`;
 }
 
 function buildRiderStatsText({ rank, power, leaderPower, gapToLeader, gapToGroup, watchedGap }) {
@@ -775,8 +734,10 @@ function buildRiderStatsText({ rank, power, leaderPower, gapToLeader, gapToGroup
     Number.isFinite(leaderPower) ? `leader ${leaderPower} W` : null,
     formatGapTo(gapToLeader, 'leader'),
     formatGapTo(gapToGroup, 'group'),
-    formatWatchedGap(watchedGap),
-  ].filter(Boolean).join(STATS_SEPARATOR);
+    watchedGap?.seconds > 0
+      ? `${formatGapDuration(watchedGap.seconds)} ${watchedGap.ahead ? 'ahead of' : 'behind'} ${watchedGap.name}`
+      : null,
+  ].filter(Boolean).join(' · ');
 }
 
 // Export for testing and module use
@@ -819,20 +780,14 @@ if (typeof module !== 'undefined' && module.exports) {
     sampleChartWindow,
     resolveShortcut,
     stepSpeed,
-    mapDistanceToAxisX,
-    classifyAxisDistance,
-    alignNearEdges,
     computeRaceStandings,
     calcStandingGap,
     calcGapToGroupAhead,
     advancePlaybackTime,
-    calcRaceDuration,
-    findWatchedRider,
     resolveWatchedRider,
     buildWatchOptions,
     shortRiderName,
-    riderMarkerRole,
-    isSameSyncedRace,
+    formatGapTo,
     buildRiderStatsText,
     // Constants
     SECONDS_PER_MINUTE,

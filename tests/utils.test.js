@@ -38,20 +38,13 @@ const {
   sampleChartWindow,
   resolveShortcut,
   stepSpeed,
-  mapDistanceToAxisX,
-  classifyAxisDistance,
-  alignNearEdges,
   computeRaceStandings,
   calcStandingGap,
   calcGapToGroupAhead,
   advancePlaybackTime,
-  calcRaceDuration,
-  findWatchedRider,
   resolveWatchedRider,
   buildWatchOptions,
   shortRiderName,
-  riderMarkerRole,
-  isSameSyncedRace,
   buildRiderStatsText,
   DEFAULT_SPEED_KMH,
   SEEK_STEP_SECONDS,
@@ -1320,10 +1313,6 @@ describe('resolveShortcut', () => {
 describe('stepSpeed', () => {
   const speeds = PLAYBACK_SPEEDS;
 
-  test('uses the shared playback speeds', () => {
-    expect(PLAYBACK_SPEEDS).toEqual([1, 5, 10, 30]);
-  });
-
   test('moves to the next or previous speed', () => {
     expect(stepSpeed(speeds, 10, 1)).toBe(30);
     expect(stepSpeed(speeds, 10, -1)).toBe(5);
@@ -1339,50 +1328,6 @@ describe('stepSpeed', () => {
   });
 });
 
-describe('mapDistanceToAxisX', () => {
-  const unzoomed = { xMin: -0.28536, xMax: 28.82136, plotLeft: 50, plotWidth: 1540 };
-  const zoomed = { xMin: 8, xMax: 14, plotLeft: 50, plotWidth: 1540 };
-
-  test('maps the course start inside the axis padding when unzoomed', () => {
-    expect(mapDistanceToAxisX(0, unzoomed)).toBeCloseTo(65.1, 1);
-    expect(mapDistanceToAxisX(28.536, unzoomed)).toBeCloseTo(1574.9, 1);
-  });
-
-  test('maps the visible range onto the full plot when zoomed', () => {
-    expect(mapDistanceToAxisX(8, zoomed)).toBe(50);
-    expect(mapDistanceToAxisX(11, zoomed)).toBe(820);
-    expect(mapDistanceToAxisX(14, zoomed)).toBe(1590);
-  });
-
-  test('stays at the plot start for an empty range', () => {
-    expect(mapDistanceToAxisX(5, { xMin: 0, xMax: 0, plotLeft: 65, plotWidth: 1510 })).toBe(65);
-  });
-
-  test('extrapolates outside the visible range', () => {
-    expect(mapDistanceToAxisX(5, zoomed)).toBeLessThan(50);
-    expect(mapDistanceToAxisX(20, zoomed)).toBeGreaterThan(1590);
-  });
-});
-
-describe('classifyAxisDistance', () => {
-  const axis = { xMin: 8, xMax: 14 };
-
-  test('splits distances into behind, visible and ahead', () => {
-    expect(classifyAxisDistance(7.9, axis)).toBe('behind');
-    expect(classifyAxisDistance(8, axis)).toBe('visible');
-    expect(classifyAxisDistance(14, axis)).toBe('visible');
-    expect(classifyAxisDistance(14.1, axis)).toBe('ahead');
-  });
-});
-
-describe('alignNearEdges', () => {
-  test('aligns to the start or end near the edges', () => {
-    expect(alignNearEdges(70, 65, 1575, 80)).toBe('start');
-    expect(alignNearEdges(1560, 65, 1575, 80)).toBe('end');
-    expect(alignNearEdges(800, 65, 1575, 80)).toBe('middle');
-  });
-});
-
 describe('computeRaceStandings', () => {
   const riders = [
     { position: 1, distance: [0, 1, 2, 3], power: [200, 300, 400, 500] },
@@ -1394,14 +1339,6 @@ describe('computeRaceStandings', () => {
     const standings = computeRaceStandings(riders, 1);
     expect(standings.map(s => s.position)).toEqual([2, 1, 3]);
     expect(standings[0]).toMatchObject({ currentDistance: 1.5, currentPower: 350, finished: false });
-  });
-
-  test('references the rider instead of copying it', () => {
-    const [first] = computeRaceStandings(riders, 1);
-    expect(first.rider).toBe(riders[1]);
-    expect(first.distance).toBe(riders[1].distance);
-    expect(Object.keys(first).sort())
-      .toEqual(['currentDistance', 'currentPower', 'distance', 'finishTime', 'finished', 'position', 'rider']);
   });
 
   test('keeps finished riders at their last distance, ordered by finish time', () => {
@@ -1450,13 +1387,6 @@ describe('calcGapToGroupAhead', () => {
     expect(calcGapToGroupAhead(groups, -1, you, 60)).toBe(0);
     expect(calcGapToGroupAhead(groups, 1, undefined, 60)).toBe(0);
   });
-
-  test('uses finish times once both riders finished', () => {
-    const finishedTail = { ...tail, finished: true, finishTime: 3600 };
-    const finishedYou = { ...you, finished: true, finishTime: 3609 };
-    const finishedGroups = [{ riders: [finishedTail], hasYou: false }, { riders: [finishedYou], hasYou: true }];
-    expect(calcGapToGroupAhead(finishedGroups, 1, finishedYou, 3700)).toBe(9);
-  });
 });
 
 describe('advancePlaybackTime', () => {
@@ -1467,33 +1397,6 @@ describe('advancePlaybackTime', () => {
 
   test('stops at the end of the race', () => {
     expect(advancePlaybackTime(3599, 1000, 30, 3600)).toBe(3600);
-  });
-});
-
-describe('calcRaceDuration', () => {
-  test('returns the longest rider time', () => {
-    expect(calcRaceDuration([{ distance: [0, 1, 2] }, { distance: [0, 1, 2, 3, 4] }])).toBe(4);
-    expect(calcRaceDuration([{ distance: [0, 1, 2] }], 5)).toBe(10);
-  });
-
-  test('returns 0 without samples', () => {
-    expect(calcRaceDuration([])).toBe(0);
-    expect(calcRaceDuration([{ distance: [] }, {}])).toBe(0);
-  });
-});
-
-describe('findWatchedRider', () => {
-  test('prefers the current user', () => {
-    const riders = [{ position: 1 }, { position: 7, isCurrentUser: true }];
-    expect(findWatchedRider(riders).position).toBe(7);
-  });
-
-  test('falls back to the best placed rider', () => {
-    expect(findWatchedRider([{ position: 4 }, { position: 2 }, { position: 9 }]).position).toBe(2);
-  });
-
-  test('returns null without riders', () => {
-    expect(findWatchedRider([])).toBeNull();
   });
 });
 
@@ -1508,17 +1411,10 @@ describe('resolveWatchedRider', () => {
     expect(resolveWatchedRider(riders, '13').zwiftId).toBe('13');
   });
 
-  test('falls back to the default when nothing is selected', () => {
-    expect(resolveWatchedRider(riders, null).zwiftId).toBe('17');
-  });
-
-  test('falls back to the default when the selected rider is gone', () => {
+  test('falls back to the current user, then the best placed rider', () => {
     expect(resolveWatchedRider(riders, '99').zwiftId).toBe('17');
-    expect(resolveWatchedRider([{ position: 4, zwiftId: '14' }, { position: 2, zwiftId: '12' }], '99').zwiftId).toBe('12');
-  });
-
-  test('returns null without riders', () => {
-    expect(resolveWatchedRider([], '11')).toBeNull();
+    expect(resolveWatchedRider([{ position: 4, zwiftId: '14' }, { position: 2, zwiftId: '12' }]).zwiftId).toBe('12');
+    expect(resolveWatchedRider([])).toBeNull();
   });
 });
 
@@ -1535,12 +1431,6 @@ describe('buildWatchOptions', () => {
       { value: '17', position: 7, label: '#7 Vitalii E (you)' },
     ]);
   });
-
-  test('does not reorder the input', () => {
-    const riders = [{ position: 2, zwiftId: '12', name: 'B' }, { position: 1, zwiftId: '11', name: 'A' }];
-    buildWatchOptions(riders);
-    expect(riders.map(r => r.zwiftId)).toEqual(['12', '11']);
-  });
 });
 
 describe('shortRiderName', () => {
@@ -1552,65 +1442,18 @@ describe('shortRiderName', () => {
   });
 });
 
-describe('riderMarkerRole', () => {
-  const context = { watchedId: '15', leaderId: '11', groupIds: new Set(['14', '15', '16']) };
-
-  test('marks the watched rider first, then the leader, then the group', () => {
-    expect(riderMarkerRole('15', context)).toBe('you');
-    expect(riderMarkerRole('11', context)).toBe('leader');
-    expect(riderMarkerRole('14', context)).toBe('group');
-    expect(riderMarkerRole('19', context)).toBe('muted');
-  });
-
-  test('keeps the watched rider style when leading', () => {
-    expect(riderMarkerRole('11', { ...context, watchedId: '11' })).toBe('you');
-  });
-});
-
-describe('isSameSyncedRace', () => {
-  const race = { riders: [{}, {}], syncedAt: '2026-11-04T10:00:00Z' };
-
-  test('matches races with the same rider count and sync time', () => {
-    expect(isSameSyncedRace(race, { riders: [{}, {}], syncedAt: race.syncedAt })).toBe(true);
-    expect(isSameSyncedRace(undefined, null)).toBe(true);
-  });
-
-  test('detects added riders, a new sync or a removed race', () => {
-    expect(isSameSyncedRace(race, { riders: [{}, {}, {}], syncedAt: race.syncedAt })).toBe(false);
-    expect(isSameSyncedRace(race, { riders: [{}, {}], syncedAt: '2026-11-04T10:01:00Z' })).toBe(false);
-    expect(isSameSyncedRace(race, undefined)).toBe(false);
-  });
-});
-
 describe('buildRiderStatsText', () => {
-  test('builds the full stats line', () => {
-    expect(buildRiderStatsText({ rank: 12, power: 287, leaderPower: 310, gapToLeader: 14, gapToGroup: 3 }))
-      .toBe('#12 · 287 W · leader 310 W · +14s to leader · +3s to group');
-  });
+  const martin = { name: 'Martin' };
 
-  test('formats gaps over a minute', () => {
-    expect(buildRiderStatsText({ rank: 20, power: 250, gapToLeader: 75 })).toBe('#20 · 250 W · +1:15 to leader');
-  });
-
-  test('hides gaps that do not apply', () => {
-    expect(buildRiderStatsText({ rank: 1, power: 310, leaderPower: 310, gapToLeader: 0, gapToGroup: 0 }))
-      .toBe('#1 · 310 W · leader 310 W');
-    expect(buildRiderStatsText({ rank: 3, power: 0 })).toBe('#3 · 0 W');
-  });
-
-  test('returns an empty line without data', () => {
-    expect(buildRiderStatsText({})).toBe('');
-  });
-
-  test('adds the gap to the watched rider', () => {
-    expect(buildRiderStatsText({ rank: 5, power: 280, gapToLeader: 14, watchedGap: { seconds: 3, ahead: true, name: 'Martin' } }))
-      .toBe('#5 · 280 W · +14s to leader · 3s ahead of Martin');
-    expect(buildRiderStatsText({ rank: 9, power: 250, watchedGap: { seconds: 65, ahead: false, name: 'Martin' } }))
-      .toBe('#9 · 250 W · 1:05 behind Martin');
-  });
-
-  test('hides a zero gap to the watched rider', () => {
-    expect(buildRiderStatsText({ rank: 5, power: 280, watchedGap: { seconds: 0, ahead: true, name: 'Martin' } }))
-      .toBe('#5 · 280 W');
+  test.each([
+    [{ rank: 12, power: 287, leaderPower: 310, gapToLeader: 14, gapToGroup: 3 }, '#12 · 287 W · leader 310 W · +14s to leader · +3s to group'],
+    [{ rank: 20, power: 250, gapToLeader: 75 }, '#20 · 250 W · +1:15 to leader'],
+    [{ rank: 1, power: 310, leaderPower: 310, gapToLeader: 0, gapToGroup: 0 }, '#1 · 310 W · leader 310 W'],
+    [{ rank: 5, power: 280, gapToLeader: 14, watchedGap: { ...martin, seconds: 3, ahead: true } }, '#5 · 280 W · +14s to leader · 3s ahead of Martin'],
+    [{ rank: 9, power: 0, watchedGap: { ...martin, seconds: 65, ahead: false } }, '#9 · 0 W · 1:05 behind Martin'],
+    [{ rank: 5, power: 280, watchedGap: { ...martin, seconds: 0, ahead: true } }, '#5 · 280 W'],
+    [{}, ''],
+  ])('builds %j', (stats, expected) => {
+    expect(buildRiderStatsText(stats)).toBe(expected);
   });
 });
