@@ -664,24 +664,6 @@ function stepSpeed(speeds, current, step) {
 
 const STATS_SEPARATOR = ' · ';
 
-function lastValue(values) {
-  return values?.length ? values[values.length - 1] : 0;
-}
-
-function resolveCourseKm(profileCourseKm, riders) {
-  if (profileCourseKm > 0) return profileCourseKm;
-  return Math.max(0, ...(riders || []).map(rider => rider.totalDistance || lastValue(rider.distance)));
-}
-
-const PROFILE_AXIS_FIELDS = ['xMin', 'xMax', 'plotLeft', 'plotTop', 'plotWidth', 'plotHeight'];
-
-function parseProfileGeometry(profile) {
-  if (!profile || !PROFILE_AXIS_FIELDS.every(field => Number.isFinite(profile[field]))) return null;
-  const { xMin, xMax, plotLeft, plotTop, plotWidth, plotHeight, courseKm } = profile;
-  if (!(xMax > xMin && plotWidth > 0)) return null;
-  return { xMin, xMax, plotLeft, plotTop, plotWidth, plotHeight, courseKm: courseKm > 0 ? courseKm : null };
-}
-
 function mapDistanceToAxisX(distanceKm, { xMin, xMax, plotLeft, plotWidth }) {
   if (!(xMax > xMin)) return plotLeft;
   return plotLeft + ((distanceKm - xMin) / (xMax - xMin)) * plotWidth;
@@ -690,39 +672,6 @@ function mapDistanceToAxisX(distanceKm, { xMin, xMax, plotLeft, plotWidth }) {
 function classifyAxisDistance(distanceKm, { xMin, xMax }) {
   if (distanceKm < xMin) return 'behind';
   return distanceKm > xMax ? 'ahead' : 'visible';
-}
-
-function transformPlotBox({ plotLeft, plotTop, plotWidth, plotHeight }, { a, b, c, d, e, f }) {
-  const right = plotLeft + plotWidth;
-  const bottom = plotTop + plotHeight;
-  const left = a * plotLeft + c * plotTop + e;
-  const top = b * plotLeft + d * plotTop + f;
-  return {
-    plotLeft: left,
-    plotTop: top,
-    plotWidth: a * right + c * bottom + e - left,
-    plotHeight: b * right + d * bottom + f - top,
-  };
-}
-
-function isSortedCurve(xs, ys) {
-  for (let i = 0; i < xs.length; i++) {
-    if (!Number.isFinite(xs[i]) || !Number.isFinite(ys[i]) || xs[i] < xs[i - 1]) return false;
-  }
-  return xs.length > 0;
-}
-
-function buildCurveLookup(xs, ys) {
-  if (isSortedCurve(xs, ys)) return x => ys[findClosestIndex(xs, x)];
-
-  const order = Array.from(xs, (_, i) => i)
-    .filter(i => Number.isFinite(xs[i]) && Number.isFinite(ys[i]))
-    .sort((a, b) => xs[a] - xs[b]);
-  if (order.length === 0) return null;
-
-  const sortedXs = order.map(i => xs[i]);
-  const sortedYs = order.map(i => ys[i]);
-  return x => sortedYs[findClosestIndex(sortedXs, x)];
 }
 
 function alignNearEdges(x, minX, maxX, marginPx) {
@@ -865,18 +814,13 @@ if (typeof module !== 'undefined' && module.exports) {
     summarizeSyncedRaces,
     buildReplayControlState,
     classifyAnalysisResponse,
-    parseJsonOrUndefined,
     debounce,
     throttle,
     sampleChartWindow,
     resolveShortcut,
     stepSpeed,
-    resolveCourseKm,
-    buildCurveLookup,
-    parseProfileGeometry,
     mapDistanceToAxisX,
     classifyAxisDistance,
-    transformPlotBox,
     alignNearEdges,
     computeRaceStandings,
     calcStandingGap,

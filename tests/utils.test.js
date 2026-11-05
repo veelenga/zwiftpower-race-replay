@@ -33,18 +33,13 @@ const {
   summarizeSyncedRaces,
   buildReplayControlState,
   classifyAnalysisResponse,
-  parseJsonOrUndefined,
   debounce,
   throttle,
   sampleChartWindow,
   resolveShortcut,
   stepSpeed,
-  resolveCourseKm,
-  buildCurveLookup,
-  parseProfileGeometry,
   mapDistanceToAxisX,
   classifyAxisDistance,
-  transformPlotBox,
   alignNearEdges,
   computeRaceStandings,
   calcStandingGap,
@@ -1089,14 +1084,6 @@ describe('classifyAnalysisResponse', () => {
   });
 });
 
-describe('parseJsonOrUndefined', () => {
-  test('parses valid JSON and returns undefined otherwise', () => {
-    expect(parseJsonOrUndefined('{"a":1}')).toEqual({ a: 1 });
-    expect(parseJsonOrUndefined('not json')).toBeUndefined();
-    expect(parseJsonOrUndefined(null)).toBeNull();
-  });
-});
-
 describe('debounce', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
@@ -1352,99 +1339,6 @@ describe('stepSpeed', () => {
   });
 });
 
-describe('resolveCourseKm', () => {
-  test('prefers the course length from the profile', () => {
-    expect(resolveCourseKm(28.5, [{ totalDistance: 30 }])).toBe(28.5);
-  });
-
-  test('falls back to the longest rider distance', () => {
-    const riders = [{ totalDistance: 27.9 }, { distance: [0, 10, 28.4] }, { totalDistance: 28.1 }];
-    expect(resolveCourseKm(null, riders)).toBe(28.4);
-  });
-
-  test('returns 0 without profile course length or riders', () => {
-    expect(resolveCourseKm(null, [])).toBe(0);
-    expect(resolveCourseKm(undefined, undefined)).toBe(0);
-  });
-});
-
-describe('buildCurveLookup', () => {
-  test('returns the y of the nearest sampled x', () => {
-    const curveY = buildCurveLookup([0, 10, 20, 30], [100, 80, 60, 90]);
-    expect(curveY(0)).toBe(100);
-    expect(curveY(12)).toBe(80);
-    expect(curveY(16)).toBe(60);
-    expect(curveY(29)).toBe(90);
-  });
-
-  test('clamps to the curve ends', () => {
-    const curveY = buildCurveLookup([10, 20], [50, 40]);
-    expect(curveY(-5)).toBe(50);
-    expect(curveY(100)).toBe(40);
-  });
-
-  test('handles ascending samples with repeated x', () => {
-    const curveY = buildCurveLookup([0, 10, 10, 20], [100, 80, 70, 60]);
-    expect(curveY(0)).toBe(100);
-    expect(curveY(19)).toBe(60);
-    expect([80, 70]).toContain(curveY(10));
-  });
-
-  test('sorts samples that are not in x order', () => {
-    const curveY = buildCurveLookup([20, 0, 10], [60, 100, 80]);
-    expect(curveY(1)).toBe(100);
-    expect(curveY(19)).toBe(60);
-  });
-
-  test('skips invalid samples and returns null without valid ones', () => {
-    expect(buildCurveLookup([0, NaN, 20], [5, 6, 7])(9)).toBe(5);
-    expect(buildCurveLookup([], [])).toBeNull();
-    expect(buildCurveLookup([NaN], [1])).toBeNull();
-  });
-});
-
-describe('parseProfileGeometry', () => {
-  const profile = {
-    xMin: -0.28536,
-    xMax: 28.82136,
-    plotLeft: 50,
-    plotWidth: 1540,
-    plotTop: 0,
-    plotHeight: 116,
-    courseKm: 28.536,
-  };
-
-  test('reads the axis range, plot box and course length', () => {
-    expect(parseProfileGeometry(profile)).toEqual({
-      xMin: -0.28536,
-      xMax: 28.82136,
-      plotLeft: 50,
-      plotWidth: 1540,
-      plotTop: 0,
-      plotHeight: 116,
-      courseKm: 28.536,
-    });
-  });
-
-  test('keeps the axis when the course length is missing', () => {
-    expect(parseProfileGeometry({ ...profile, courseKm: undefined })).toMatchObject({ xMin: -0.28536, courseKm: null });
-  });
-
-  test('drops unknown fields', () => {
-    expect(parseProfileGeometry({ ...profile, extra: 1 })).not.toHaveProperty('extra');
-  });
-
-  test('returns null when fields are missing or invalid', () => {
-    expect(parseProfileGeometry({})).toBeNull();
-    expect(parseProfileGeometry(undefined)).toBeNull();
-    expect(parseProfileGeometry(null)).toBeNull();
-    expect(parseProfileGeometry({ ...profile, plotLeft: undefined })).toBeNull();
-    expect(parseProfileGeometry({ ...profile, xMin: '0' })).toBeNull();
-    expect(parseProfileGeometry({ ...profile, xMax: -1 })).toBeNull();
-    expect(parseProfileGeometry({ ...profile, plotWidth: 0 })).toBeNull();
-  });
-});
-
 describe('mapDistanceToAxisX', () => {
   const unzoomed = { xMin: -0.28536, xMax: 28.82136, plotLeft: 50, plotWidth: 1540 };
   const zoomed = { xMin: 8, xMax: 14, plotLeft: 50, plotWidth: 1540 };
@@ -1478,19 +1372,6 @@ describe('classifyAxisDistance', () => {
     expect(classifyAxisDistance(8, axis)).toBe('visible');
     expect(classifyAxisDistance(14, axis)).toBe('visible');
     expect(classifyAxisDistance(14.1, axis)).toBe('ahead');
-  });
-});
-
-describe('transformPlotBox', () => {
-  const box = { plotLeft: 50, plotTop: 0, plotWidth: 1540, plotHeight: 116 };
-
-  test('keeps the box with an identity matrix', () => {
-    expect(transformPlotBox(box, { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 })).toEqual(box);
-  });
-
-  test('applies offset and scale', () => {
-    expect(transformPlotBox(box, { a: 0.5, b: 0, c: 0, d: 2, e: 10, f: 5 }))
-      .toEqual({ plotLeft: 35, plotTop: 5, plotWidth: 770, plotHeight: 232 });
   });
 });
 

@@ -1,11 +1,9 @@
 const INLINE_GRAPH_SELECTOR = '#segment_graph';
-const INLINE_PATH_SELECTOR = 'path.highcharts-graph';
 const INLINE_PROFILE_ATTRIBUTE = 'data-zp-profile';
 const INLINE_SVG_NS = 'http://www.w3.org/2000/svg';
 const INLINE_HOST_CLASS = 'zp-replay-host';
 const INLINE_DOT_CLASS = 'zp-replay-dot';
 const INLINE_DOT_RADII = { you: 6.5, leader: 5, group: 4.5, muted: 3.5 };
-const INLINE_GEOMETRY_DELAY_MS = 100;
 const INLINE_LABEL_OFFSET_PX = 11;
 const INLINE_LABEL_EDGE_PX = 80;
 const INLINE_TOOLTIP_EDGE_PX = 90;
@@ -63,64 +61,18 @@ function setIfChanged(element, attribute, value) {
   else element.setAttribute(attribute, value);
 }
 
-function findProfileTarget() {
-  const graph = document.querySelector(INLINE_GRAPH_SELECTOR);
-  const path = graph?.querySelector(INLINE_PATH_SELECTOR);
-  return path ? { graph, path } : null;
-}
-
 function readProfile(graph) {
-  return parseProfileGeometry(parseJsonOrUndefined(graph.getAttribute(INLINE_PROFILE_ATTRIBUTE)));
+  return graph ? JSON.parse(graph.getAttribute(INLINE_PROFILE_ATTRIBUTE)) : null;
 }
 
-function samplePath(path, length, matrix, maxSamples) {
-  const count = clamp(Math.ceil(length), 2, Math.max(Math.ceil(maxSamples), 2));
-  const xs = new Array(count);
-  const ys = new Array(count);
-  for (let i = 0; i < count; i++) {
-    const point = path.getPointAtLength((length * i) / (count - 1));
-    xs[i] = matrix.a * point.x + matrix.c * point.y + matrix.e;
-    ys[i] = matrix.b * point.x + matrix.d * point.y + matrix.f;
-  }
-  return { xs, ys };
+function findProfileGraph() {
+  const graph = document.querySelector(INLINE_GRAPH_SELECTOR);
+  return readProfile(graph) ? graph : null;
 }
 
-function chartAxis(profile, path, toLayer) {
-  const chartMatrix = path.ownerSVGElement?.getScreenCTM();
-  return chartMatrix ? { ...profile, ...transformPlotBox(profile, toLayer.multiply(chartMatrix)) } : null;
-}
-
-function endpointAxis({ xs, ys }, courseKm) {
-  const firstX = xs[0];
-  const top = Math.min(...ys);
-  return {
-    xMin: 0,
-    xMax: courseKm,
-    plotLeft: firstX,
-    plotWidth: xs[xs.length - 1] - firstX,
-    plotTop: top,
-    plotHeight: Math.max(...ys) - top,
-  };
-}
-
-function measureProfile(view) {
-  const layerMatrix = view.layer.getScreenCTM();
-  const pathMatrix = view.path.getScreenCTM();
-  const length = view.path.getTotalLength();
-  if (!layerMatrix || !pathMatrix || !(length > 0)) return null;
-
-  const toLayer = layerMatrix.inverse();
-  const profile = readProfile(view.graph);
-  const plotWidth = profile ? profile.plotWidth : view.graph.clientWidth;
-  const samples = samplePath(view.path, length, toLayer.multiply(pathMatrix), plotWidth);
-  const courseKm = resolveCourseKm(profile?.courseKm, inlineReplay.riders);
-  const axis = (profile && chartAxis(profile, view.path, toLayer)) || endpointAxis(samples, courseKm);
-  return { curveY: buildCurveLookup(samples.xs, samples.ys), axis: { ...axis, courseKm } };
-}
-
-function positionEdgeCounts({ edges, geometry }) {
-  if (!geometry) return;
-  const { plotLeft, plotTop, plotWidth, plotHeight } = geometry.axis;
+function positionEdgeCounts({ edges, profile }) {
+  if (!profile) return;
+  const { plotLeft, plotTop, plotWidth, plotHeight } = profile;
   const y = String(plotTop + plotHeight - INLINE_EDGE_BOTTOM_PX);
   setIfChanged(edges.behind.element, 'x', String(plotLeft + INLINE_EDGE_INSET_PX));
   setIfChanged(edges.behind.element, 'y', y);
@@ -128,24 +80,22 @@ function positionEdgeCounts({ edges, geometry }) {
   setIfChanged(edges.ahead.element, 'y', y);
 }
 
-function updateInlineGeometry(view) {
-  view.geometry = measureProfile(view);
+function updateInlineProfile(view) {
+  view.profile = readProfile(view.graph);
   positionEdgeCounts(view);
 }
 
-function refreshInlineGeometry() {
+function refreshInlineProfile() {
   const { view } = inlineReplay;
   if (!view) return;
-  updateInlineGeometry(view);
+  updateInlineProfile(view);
   inlineReplay.lastSnapshot = null;
   renderInlineFrame();
 }
 
 function observeProfileChanges(view) {
-  const refreshSoon = debounce(refreshInlineGeometry, INLINE_GEOMETRY_DELAY_MS);
-  const observer = new MutationObserver(() => refreshSoon());
+  const observer = new MutationObserver(refreshInlineProfile);
   observer.observe(view.graph, { attributes: true, attributeFilter: [INLINE_PROFILE_ATTRIBUTE] });
-  observer.observe(view.path, { attributes: true, attributeFilter: ['d'] });
   view.observers.push(observer);
 }
 
@@ -281,11 +231,10 @@ function createInlineBar() {
   return { element, play, time, scrubber, speedButtons: speeds.buttons, watchSelect: watch.select, stats };
 }
 
-function mountInlineView({ graph, path }) {
+function mountInlineView(graph) {
   const layer = createInlineLayer();
   const view = {
     graph,
-    path,
     layer,
     edges: createEdgeCounts(layer),
     label: createWatchLabel(),
@@ -293,7 +242,7 @@ function mountInlineView({ graph, path }) {
     bar: createInlineBar(),
     dots: new Map(),
     observers: [],
-    geometry: null,
+    profile: null,
     renderedSnapshot: null,
   };
 
@@ -317,24 +266,23 @@ function unmountInlineView() {
   inlineReplay.view = null;
 }
 
-function isInlineViewCurrent(target) {
+function isInlineViewCurrent(graph) {
   const { view } = inlineReplay;
-  return Boolean(view && target) &&
-    view.graph === target.graph &&
-    view.path === target.path &&
+  return Boolean(view && graph) &&
+    view.graph === graph &&
     view.layer.isConnected &&
     view.bar.element.isConnected;
 }
 
 function ensureInlineView() {
-  const target = inlineReplay.riders.length > 0 ? findProfileTarget() : null;
-  if (!target) {
+  const graph = inlineReplay.riders.length > 0 ? findProfileGraph() : null;
+  if (!graph) {
     unmountInlineView();
     return false;
   }
-  if (!isInlineViewCurrent(target)) {
+  if (!isInlineViewCurrent(graph)) {
     unmountInlineView();
-    mountInlineView(target);
+    mountInlineView(graph);
   }
   return true;
 }
@@ -432,28 +380,26 @@ function inlineSnapshot() {
   return inlineReplay.lastSnapshot;
 }
 
-function standingCourseKm(standing, courseKm) {
-  return standing.finished ? courseKm : clamp(standing.currentDistance, 0, courseKm);
-}
-
-function placeStanding(standing, axis) {
-  const distanceKm = standingCourseKm(standing, axis.courseKm);
-  return { side: classifyAxisDistance(distanceKm, axis), x: mapDistanceToAxisX(distanceKm, axis) };
+function placeStanding(standing, profile) {
+  const { courseKm, plotLeft, ys } = profile;
+  const distanceKm = standing.finished ? courseKm : clamp(standing.currentDistance, 0, courseKm);
+  const x = mapDistanceToAxisX(distanceKm, profile);
+  const y = ys[clamp(Math.round(x - plotLeft), 0, ys.length - 1)];
+  return { side: classifyAxisDistance(distanceKm, profile), x, y };
 }
 
 function axisAlignment(x, { plotLeft, plotWidth }, marginPx) {
   return alignNearEdges(x, plotLeft, plotLeft + plotWidth, marginPx);
 }
 
-function renderDot(view, dot, role, x) {
-  const y = view.geometry.curveY(x);
+function renderDot(view, dot, role, { x, y }) {
   Object.assign(dot, { x, y });
   setIfChanged(dot.element, 'display', null);
   setIfChanged(dot.element, 'class', `${INLINE_DOT_CLASS} ${INLINE_DOT_CLASS}-${role}`);
   setIfChanged(dot.circle, 'r', String(INLINE_DOT_RADII[role]));
   setIfChanged(dot.element, 'transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
   if (role === 'you') {
-    setIfChanged(view.label.element, 'text-anchor', axisAlignment(x, view.geometry.axis, INLINE_LABEL_EDGE_PX));
+    setIfChanged(view.label.element, 'text-anchor', axisAlignment(x, view.profile, INLINE_LABEL_EDGE_PX));
   }
 }
 
@@ -463,20 +409,20 @@ function renderEdgeCount(edge, count) {
 }
 
 function renderInlineDots(view, snapshot) {
-  const { geometry } = view;
-  if (!geometry?.curveY) return;
+  const { profile } = view;
+  if (!profile) return;
 
   const hidden = { behind: 0, ahead: 0 };
   snapshot.standings.forEach(standing => {
     const dot = view.dots.get(standing.rider.zwiftId);
     if (!dot) return;
-    const { side, x } = placeStanding(standing, geometry.axis);
-    if (side === 'visible') {
-      renderDot(view, dot, riderMarkerRole(standing.rider.zwiftId, snapshot.roleContext), x);
+    const point = placeStanding(standing, profile);
+    if (point.side === 'visible') {
+      renderDot(view, dot, riderMarkerRole(standing.rider.zwiftId, snapshot.roleContext), point);
       return;
     }
     setIfChanged(dot.element, 'display', 'none');
-    hidden[side]++;
+    hidden[point.side]++;
   });
   renderEdgeCount(view.edges.behind, hidden.behind);
   renderEdgeCount(view.edges.ahead, hidden.ahead);
@@ -495,7 +441,7 @@ function isDotShown(dot) {
 }
 
 function hoveredStandingIndex(view, snapshot) {
-  if (!view.geometry || !isDotShown(view.dots.get(inlineReplay.hoveredId))) return -1;
+  if (!view.profile || !isDotShown(view.dots.get(inlineReplay.hoveredId))) return -1;
   return snapshot.ranks.get(inlineReplay.hoveredId) ?? -1;
 }
 
@@ -523,7 +469,7 @@ function renderInlineTooltip(view, snapshot) {
     gapToLeader: calcStandingGap(snapshot.standings[0], standing, snapshot.time, inlineReplay.sampleInterval),
     watchedGap: watchedGapFor(index, snapshot),
   }));
-  const transform = tooltipTransform(view.dots.get(standing.rider.zwiftId), view.geometry.axis);
+  const transform = tooltipTransform(view.dots.get(standing.rider.zwiftId), view.profile);
   setIfChanged(tooltip.element, 'style', `transform: ${transform}`);
 }
 
@@ -617,7 +563,7 @@ function renderInlineReplay() {
   const { view } = inlineReplay;
   const watched = inlineWatchedRider();
   syncInlineDots(view, watched);
-  updateInlineGeometry(view);
+  updateInlineProfile(view);
   renderInlineRace(view, watched);
   renderInlineFrame();
 }
@@ -704,7 +650,7 @@ function reportInlineError(error) {
 function refreshInlineReplay(raceKey) {
   if (!raceKey) return;
   if (raceKey !== inlineReplay.raceKey) loadInlineRace(raceKey).catch(reportInlineError);
-  else if (!isInlineViewCurrent(findProfileTarget())) renderInlineReplay();
+  else if (!isInlineViewCurrent(findProfileGraph())) renderInlineReplay();
 }
 
 function handleInlineRacesChanged(races) {
@@ -731,7 +677,7 @@ async function startInlineReplay(raceKey) {
 }
 
 function watchInlineReplay(raceKey) {
-  if (!findProfileTarget()) return false;
+  if (!findProfileGraph()) return false;
   startInlineReplay(raceKey).catch(reportInlineError);
   return true;
 }
