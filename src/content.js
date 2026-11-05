@@ -718,9 +718,14 @@ function watchCategorySwitches() {
   window.addEventListener('hashchange', refreshSoon);
 }
 
+function isOwnMutation({ target }) {
+  return Boolean(target.closest?.('.zp-replay-layer, .zp-replay-bar'));
+}
+
 function watchPageChanges() {
   const refresh = throttle(refreshReplayControl, CONTROL_MOUNT_THROTTLE_MS);
-  new MutationObserver(() => refresh()).observe(document.body, { childList: true, subtree: true });
+  const onMutations = mutations => { if (!mutations.every(isOwnMutation)) refresh(); };
+  new MutationObserver(onMutations).observe(document.body, { childList: true, subtree: true });
 }
 
 async function initReplayControl() {
