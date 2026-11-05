@@ -578,7 +578,7 @@ function requestOpenReplay(raceKey) {
 }
 
 function watchReplay(raceKey) {
-  if (!globalThis.watchInlineReplay?.(raceKey)) requestOpenReplay(raceKey);
+  if (!watchInlineReplay(raceKey)) requestOpenReplay(raceKey);
 }
 
 async function startSyncFromControl({ openWhenDone }) {
@@ -689,15 +689,7 @@ function refreshReplayControl() {
   if (categoryChanged || !replayControl.elements.root.isConnected) {
     renderReplayControl();
   }
-  refreshInlineReplayForControl();
-}
-
-function currentReplayRaceKey() {
-  return replayControl.raceKey;
-}
-
-function refreshInlineReplayForControl() {
-  globalThis.refreshInlineReplay?.(replayControl.raceKey);
+  refreshInlineReplay(replayControl.raceKey);
 }
 
 function updateReplayControlData(values) {
@@ -715,7 +707,7 @@ function handleReplayStorageChange(changes, areaName) {
 
   updateReplayControlData(Object.fromEntries(keys.map(key => [key, changes[key].newValue])));
   renderReplayControl();
-  if (SYNCED_RACES_KEY in changes) globalThis.handleInlineRacesChanged?.(changes[SYNCED_RACES_KEY].newValue);
+  if (SYNCED_RACES_KEY in changes) handleInlineRacesChanged(changes[SYNCED_RACES_KEY].newValue);
 }
 
 function watchCategorySwitches() {
@@ -738,7 +730,7 @@ async function initReplayControl() {
   replayControl.elements = createReplayControlElements();
   updateReplayControlData(await chrome.storage.local.get([SYNC_STATUS_KEY, SYNCED_RACES_KEY]));
   renderReplayControl();
-  refreshInlineReplayForControl();
+  refreshInlineReplay(replayControl.raceKey);
 
   chrome.storage.onChanged.addListener(handleReplayStorageChange);
   watchCategorySwitches();

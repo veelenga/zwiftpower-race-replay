@@ -3,25 +3,19 @@ const globals = require('globals');
 
 const sharedUtils = Object.keys(require('./src/utils'));
 
-const contentScriptApi = [
-  'createControlElement',
-  'createControlButton',
-  'currentReplayRaceKey',
-  'getExistingRaceData',
-  'requestOpenReplay',
-];
-
-const inlineReplayApi = ['refreshInlineReplay', 'handleInlineRacesChanged', 'watchInlineReplay'];
-
 const readonlyGlobals = names => Object.fromEntries(names.map(name => [name, 'readonly']));
-
-const unusedExceptApi = api => ['error', { varsIgnorePattern: `^(${api.join('|')})$` }];
 
 const scriptOptions = { ecmaVersion: 2022, sourceType: 'script' };
 
 module.exports = [
   { ignores: ['node_modules/**', 'dist/**', 'src/lib/**'] },
   js.configs.recommended,
+  {
+    files: ['src/**/*.js'],
+    rules: {
+      'no-unused-vars': ['error', { vars: 'local' }],
+    },
+  },
   {
     files: ['src/**/*.js'],
     ignores: ['src/profile-bridge.js'],
@@ -52,16 +46,13 @@ module.exports = [
   {
     files: ['src/inline-replay.js'],
     languageOptions: {
-      globals: readonlyGlobals(contentScriptApi),
-    },
-    rules: {
-      'no-unused-vars': unusedExceptApi(inlineReplayApi),
+      globals: readonlyGlobals(['getExistingRaceData', 'requestOpenReplay', 'replayControl']),
     },
   },
   {
     files: ['src/content.js'],
-    rules: {
-      'no-unused-vars': unusedExceptApi(contentScriptApi),
+    languageOptions: {
+      globals: readonlyGlobals(['refreshInlineReplay', 'handleInlineRacesChanged', 'watchInlineReplay']),
     },
   },
   {
