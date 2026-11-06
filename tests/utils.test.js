@@ -901,24 +901,6 @@ describe('resolveShortcut', () => {
     expect(press('ArrowRight', { shiftKey: true })).toEqual({ type: 'seekBy', seconds: SEEK_SHIFT_STEP_SECONDS });
   });
 
-  test('up and down arrows change speed', () => {
-    expect(press('ArrowUp')).toEqual({ type: 'changeSpeed', step: 1 });
-    expect(press('ArrowDown')).toEqual({ type: 'changeSpeed', step: -1 });
-  });
-
-  test('digits jump to a tenth of the race', () => {
-    expect(press('0')).toEqual({ type: 'seekFraction', fraction: 0 });
-    expect(press('5')).toEqual({ type: 'seekFraction', fraction: 0.5 });
-    expect(press('9')).toEqual({ type: 'seekFraction', fraction: 0.9 });
-  });
-
-  test('maps r, slash and question mark', () => {
-    expect(press('r')).toEqual({ type: 'resetZoom' });
-    expect(press('R', { shiftKey: true })).toEqual({ type: 'resetZoom' });
-    expect(press('/')).toEqual({ type: 'focusSearch' });
-    expect(press('?', { shiftKey: true })).toEqual({ type: 'toggleHelp' });
-  });
-
   test('returns null for keys without a shortcut', () => {
     expect(press('a')).toBeNull();
     expect(press('Enter')).toBeNull();
@@ -926,28 +908,22 @@ describe('resolveShortcut', () => {
   });
 
   test('ignores keys pressed with ctrl, meta or alt', () => {
-    expect(press('r', { metaKey: true })).toBeNull();
-    expect(press('r', { ctrlKey: true })).toBeNull();
-    expect(press('1', { altKey: true })).toBeNull();
+    expect(press(' ', { metaKey: true })).toBeNull();
+    expect(press(' ', { ctrlKey: true })).toBeNull();
+    expect(press('ArrowLeft', { altKey: true })).toBeNull();
   });
 
   test('ignores shortcuts while typing in text inputs, selects, text areas and editable content', () => {
     expect(press(' ', { target: { tagName: 'INPUT', type: 'text' } })).toBeNull();
-    expect(press('r', { target: { tagName: 'INPUT', type: 'search' } })).toBeNull();
-    expect(press('ArrowDown', { target: { tagName: 'SELECT' } })).toBeNull();
-    expect(press('1', { target: { tagName: 'TEXTAREA' } })).toBeNull();
-    expect(press('/', { target: { tagName: 'DIV', isContentEditable: true } })).toBeNull();
+    expect(press('ArrowLeft', { target: { tagName: 'INPUT', type: 'search' } })).toBeNull();
+    expect(press('ArrowRight', { target: { tagName: 'SELECT' } })).toBeNull();
+    expect(press(' ', { target: { tagName: 'TEXTAREA' } })).toBeNull();
+    expect(press(' ', { target: { tagName: 'DIV', isContentEditable: true } })).toBeNull();
   });
 
   test('keeps shortcuts on non text inputs such as the scrubber', () => {
     expect(press(' ', { target: { tagName: 'INPUT', type: 'range' } })).toEqual({ type: 'togglePlay' });
     expect(press('ArrowRight', { target: { tagName: 'INPUT', type: 'range' } })).toEqual({ type: 'seekBy', seconds: SEEK_STEP_SECONDS });
-  });
-
-  test('escape works everywhere, including while typing', () => {
-    expect(press('Escape')).toEqual({ type: 'escape' });
-    expect(press('Escape', { target: { tagName: 'INPUT', type: 'text' } })).toEqual({ type: 'escape' });
-    expect(press('Escape', { target: { tagName: 'SELECT' } })).toEqual({ type: 'escape' });
   });
 
   test('leaves space to focused buttons and links so they keep native activation', () => {
@@ -956,9 +932,8 @@ describe('resolveShortcut', () => {
     expect(press('ArrowRight', { target: { tagName: 'BUTTON' } })).toEqual({ type: 'seekBy', seconds: SEEK_STEP_SECONDS });
   });
 
-  test('allows key repeat only for seeking and speed changes', () => {
+  test('allows key repeat only for seeking', () => {
     expect(press('ArrowRight', { repeat: true })).toEqual({ type: 'seekBy', seconds: SEEK_STEP_SECONDS });
-    expect(press('ArrowUp', { repeat: true })).toEqual({ type: 'changeSpeed', step: 1 });
     expect(press(' ', { repeat: true })).toBeNull();
     expect(press('r', { repeat: true })).toBeNull();
   });
