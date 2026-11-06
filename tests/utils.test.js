@@ -935,6 +935,29 @@ describe('buildReplayControlState', () => {
     });
   });
 
+  test('shows a notice for the synced race in place of the summary', () => {
+    const raceSummary = { riderCount: 46, syncInProgress: false };
+    const notice = { raceKey, text: 'Course profile not found on this page' };
+
+    expect(build({ raceSummary, notice })).toEqual({
+      kind: 'synced',
+      buttonLabel: 'Watch replay',
+      progress: null,
+      link: 'resync',
+      statusText: 'Course profile not found on this page',
+      isError: true,
+    });
+  });
+
+  test('ignores a notice of another category or while syncing', () => {
+    const raceSummary = { riderCount: 46, syncInProgress: false };
+    const notice = { raceKey: '123_B', text: 'Course profile not found on this page' };
+    const syncStatus = freshStatus({ status: 'starting' });
+
+    expect(build({ raceSummary, notice }).statusText).toBe('46 riders synced');
+    expect(build({ raceSummary, syncStatus, notice: { ...notice, raceKey } }).statusText).toBe('Preparing riders');
+  });
+
   test('marks a synced race whose sync did not finish', () => {
     const state = build({ raceSummary: { riderCount: 12, syncInProgress: true } });
     expect(state.kind).toBe('synced');

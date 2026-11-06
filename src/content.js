@@ -29,6 +29,7 @@ const CONTROL_REFRESH_DELAY_MS = 100;
 const CONTROL_MOUNT_THROTTLE_MS = 250;
 const CONTROL_STANDALONE_CLASS = 'zp-replay-standalone';
 const CONTROL_LINK_LABELS = { cancel: 'Cancel', resync: 'Re-sync' };
+const PROFILE_NOT_FOUND_NOTICE = 'Course profile not found on this page';
 
 // Sync state
 let currentSyncAbortController = null;
@@ -559,6 +560,7 @@ const replayControl = {
   state: null,
   syncStatus: null,
   races: {},
+  notice: null,
 };
 
 const CONTROL_BUTTON_ACTIONS = {
@@ -572,16 +574,18 @@ const CONTROL_LINK_ACTIONS = {
   resync: () => startSyncFromControl({ openWhenDone: false }),
 };
 
-function requestOpenReplay(raceKey) {
-  chrome.runtime.sendMessage({ action: 'openReplay', eventId: raceKey })
-    .catch(error => console.log(`[ZP Replay] Could not open replay: ${error.message}`));
+function setControlNotice(notice) {
+  replayControl.notice = notice;
+  renderReplayControl();
 }
 
 function watchReplay(raceKey) {
-  if (!watchInlineReplay(raceKey)) requestOpenReplay(raceKey);
+  if (raceKey !== replayControl.raceKey) return;
+  setControlNotice(watchInlineReplay(raceKey) ? null : { raceKey, text: PROFILE_NOT_FOUND_NOTICE });
 }
 
 async function startSyncFromControl({ openWhenDone }) {
+  setControlNotice(null);
   replayControl.elements.button.disabled = true;
   const result = await runSync();
   if (openWhenDone && result.success && !result.cancelled) {
@@ -677,6 +681,7 @@ function renderReplayControl() {
     raceKey,
     now: Date.now(),
     maxAgeMs: SYNC_STATUS_MAX_AGE_MS,
+    notice: replayControl.notice,
   });
 
   Object.assign(replayControl, { raceKey, state });

@@ -504,21 +504,23 @@ const REPLAY_CONTROL_SYNC_STATES = {
   }),
 };
 
-function buildReplayControlState({ syncStatus, raceSummary, raceKey, now, maxAgeMs }) {
+function buildSyncedControlState(raceSummary, noticeText) {
+  return {
+    kind: 'synced',
+    buttonLabel: 'Watch replay',
+    progress: null,
+    link: 'resync',
+    statusText: noticeText || describeSyncedRace(raceSummary),
+    isError: Boolean(noticeText),
+  };
+}
+
+function buildReplayControlState({ syncStatus, raceSummary, raceKey, now, maxAgeMs, notice = null }) {
   const isCurrentStatus = syncStatus?.raceKey === raceKey && !isSyncStatusStale(syncStatus, now, maxAgeMs);
   const buildSyncState = isCurrentStatus ? REPLAY_CONTROL_SYNC_STATES[syncStatus.status] : null;
   if (buildSyncState) return buildSyncState(syncStatus);
 
-  if (raceSummary) {
-    return {
-      kind: 'synced',
-      buttonLabel: 'Watch replay',
-      progress: null,
-      link: 'resync',
-      statusText: describeSyncedRace(raceSummary),
-      isError: false,
-    };
-  }
+  if (raceSummary) return buildSyncedControlState(raceSummary, notice?.raceKey === raceKey ? notice.text : null);
 
   return { kind: 'idle', buttonLabel: 'Replay race', progress: null, link: null, statusText: '', isError: false };
 }
