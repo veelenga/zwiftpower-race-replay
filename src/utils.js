@@ -222,26 +222,6 @@ function selectRidersToSync(allRiders, maxRiders) {
 }
 
 /**
- * Check if position is valid
- * @param {number} position - Position to validate
- * @returns {boolean} Whether position is valid
- */
-function isValidPosition(position) {
-  return position && position > 0 && position <= MAX_POSITION;
-}
-
-/**
- * Linear interpolation between two values
- * @param {number} start - Start value
- * @param {number} end - End value
- * @param {number} t - Interpolation factor (0-1)
- * @returns {number} Interpolated value
- */
-function lerp(start, end, t) {
-  return start + (end - start) * t;
-}
-
-/**
  * Clamp a value between min and max
  * @param {number} value - Value to clamp
  * @param {number} min - Minimum value
@@ -252,59 +232,7 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-/**
- * Calculate average power for a group of riders at each time index
- * @param {Array} riders - Array of rider objects with power arrays
- * @returns {Array} Array of average power values
- */
-function calcGroupAveragePower(riders) {
-  if (!riders || riders.length === 0) return [];
-
-  const maxLen = Math.max(...riders.map(r => (r.power || []).length));
-  const avgPower = [];
-
-  for (let i = 0; i < maxLen; i++) {
-    const sum = riders.reduce((acc, r) => acc + ((r.power || [])[i] || 0), 0);
-    avgPower.push(Math.round(sum / riders.length));
-  }
-
-  return avgPower;
-}
-
-/**
- * Calculate average heart rate for a group of riders at a specific index
- * Filters out zero/invalid values before averaging
- * @param {Array} riders - Array of rider objects with heartRate arrays
- * @param {number} index - Time index to calculate average for
- * @returns {number} Average heart rate, or 0 if no valid data
- */
-function calcGroupAverageHR(riders, index) {
-  if (!riders || riders.length === 0) return 0;
-
-  const hrValues = riders
-    .map(r => (r.heartRate || [])[index])
-    .filter(v => v && v > 0);
-
-  if (hrValues.length === 0) return 0;
-  return Math.round(hrValues.reduce((a, b) => a + b, 0) / hrValues.length);
-}
-
-/**
- * Filter riders by search term (case-insensitive)
- * @param {Array} riders - Array of rider objects with name property
- * @param {string} searchTerm - Search term
- * @returns {Array} Filtered riders
- */
-function filterRidersByName(riders, searchTerm) {
-  if (!riders) return [];
-  if (!searchTerm || !searchTerm.trim()) return riders;
-
-  const searchLower = searchTerm.toLowerCase().trim();
-  return riders.filter(r => r.name && r.name.toLowerCase().includes(searchLower));
-}
-
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-const HIGHLIGHT_MARK_OPEN = '<mark style="background:#58a6ff33;color:#58a6ff;">';
 const EVENT_ID_PATTERN = /^\d+(_[A-Z0-9]+)?$/;
 
 function escapeHtml(value) {
@@ -313,28 +241,6 @@ function escapeHtml(value) {
 
 function isValidEventId(value) {
   return typeof value === 'string' && EVENT_ID_PATTERN.test(value);
-}
-
-/**
- * Highlight matching text in a name string
- * @param {string} name - Full name
- * @param {string} searchTerm - Search term to highlight
- * @returns {string} HTML-escaped name with the first match wrapped in a mark tag
- */
-function highlightMatch(name, searchTerm) {
-  if (!name || !searchTerm || !searchTerm.trim()) return escapeHtml(name);
-
-  const searchLower = searchTerm.toLowerCase().trim();
-  const start = name.toLowerCase().indexOf(searchLower);
-
-  if (start < 0) return escapeHtml(name);
-
-  const end = start + searchLower.length;
-  return escapeHtml(name.slice(0, start)) +
-    HIGHLIGHT_MARK_OPEN +
-    escapeHtml(name.slice(start, end)) +
-    '</mark>' +
-    escapeHtml(name.slice(end));
 }
 
 const CATEGORY_PATTERN = /^([A-E]|ALL)$/i;
@@ -395,54 +301,6 @@ function parsePosition(text, maxPosition = MAX_POSITION) {
   if (!/^\d+$/.test(trimmed)) return null;
   const pos = parseInt(trimmed, 10);
   return pos > 0 && pos <= maxPosition ? pos : null;
-}
-
-/**
- * Find the index of the closest value in a sorted array using binary search
- * @param {Array<number>} sortedArray - Sorted array of numbers (ascending)
- * @param {number} target - Target value to find closest match for
- * @returns {number} Index of the closest value, or -1 if array is empty
- */
-function findClosestIndex(sortedArray, target) {
-  if (!sortedArray || sortedArray.length === 0) return -1;
-  if (sortedArray.length === 1) return 0;
-
-  let left = 0;
-  let right = sortedArray.length - 1;
-
-  while (left < right) {
-    const mid = Math.floor((left + right) / 2);
-    if (sortedArray[mid] < target) {
-      left = mid + 1;
-    } else {
-      right = mid;
-    }
-  }
-
-  if (left === 0) return 0;
-  if (left === sortedArray.length) return sortedArray.length - 1;
-
-  const diffLeft = Math.abs(sortedArray[left] - target);
-  const diffPrev = Math.abs(sortedArray[left - 1] - target);
-
-  return diffPrev <= diffLeft ? left - 1 : left;
-}
-
-/**
- * Get a value from a data array at a specific distance position
- * Uses the distance array to find the correct index, then returns the corresponding data value
- * @param {Array<number>} distanceArray - Array of distance values (sorted ascending)
- * @param {Array<number>} dataArray - Array of data values (same length as distanceArray)
- * @param {number} targetDistance - Target distance to look up
- * @returns {number} Value from dataArray at the closest distance, or 0 if not found
- */
-function getValueAtDistance(distanceArray, dataArray, targetDistance) {
-  if (!distanceArray || !dataArray || distanceArray.length === 0) return 0;
-
-  const idx = findClosestIndex(distanceArray, targetDistance);
-  if (idx < 0 || idx >= dataArray.length) return 0;
-
-  return dataArray[idx] || 0;
 }
 
 function isSyncStatusForEvent(status, eventId) {
@@ -593,23 +451,6 @@ function throttle(fn, intervalMs) {
   return throttled;
 }
 
-function sampleChartWindow(riders, time, { windowSeconds, stepSeconds, sampleInterval = 1 }) {
-  const labels = [];
-  const series = riders.map(() => ({ power: [], heartRate: [] }));
-  if (!(stepSeconds > 0)) return { labels, series };
-
-  for (let t = Math.max(0, time - windowSeconds); t <= time; t += stepSeconds) {
-    const idx = timeToIndex(t, sampleInterval);
-    labels.push(formatTime(t));
-    riders.forEach((rider, i) => {
-      series[i].power.push(rider.power?.[idx] || 0);
-      series[i].heartRate.push(rider.heartRate?.[idx] || null);
-    });
-  }
-
-  return { labels, series };
-}
-
 const PLAYBACK_SPEEDS = [1, 5, 10, 30];
 const SEEK_STEP_SECONDS = 5;
 const SEEK_SHIFT_STEP_SECONDS = 30;
@@ -656,12 +497,6 @@ function resolveShortcut({ key, shiftKey = false, ctrlKey = false, metaKey = fal
   const action = shortcutForKey(key, shiftKey);
   if (!action || (repeat && !REPEATABLE_SHORTCUTS.includes(action.type))) return null;
   return action;
-}
-
-function stepSpeed(speeds, current, step) {
-  const index = speeds.indexOf(current);
-  if (index < 0) return current;
-  return speeds[clamp(index + step, 0, speeds.length - 1)];
 }
 
 function riderStandingAt(rider, time, sampleInterval) {
@@ -755,22 +590,14 @@ if (typeof module !== 'undefined' && module.exports) {
     calcTimeGap,
     detectGroups,
     selectRidersToSync,
-    isValidPosition,
-    lerp,
     clamp,
-    calcGroupAveragePower,
-    calcGroupAverageHR,
-    filterRidersByName,
     escapeHtml,
     isValidEventId,
-    highlightMatch,
     isValidCategory,
     parseCategoryFromHash,
     parseCategoryFromUrl,
     formatCategoryName,
     parsePosition,
-    findClosestIndex,
-    getValueAtDistance,
     isSyncStatusForEvent,
     isSyncStatusStale,
     buildRaceKey,
@@ -779,9 +606,7 @@ if (typeof module !== 'undefined' && module.exports) {
     classifyAnalysisResponse,
     debounce,
     throttle,
-    sampleChartWindow,
     resolveShortcut,
-    stepSpeed,
     computeRaceStandings,
     calcStandingGap,
     calcGapToGroupAhead,
