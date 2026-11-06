@@ -362,8 +362,7 @@ function beginSync() {
   return currentSyncAbortController.signal;
 }
 
-async function prepareSyncContext() {
-  const eventId = getEventIdFromUrl();
+async function prepareSyncContext({ eventId, raceKey }) {
   if (!eventId) {
     throw new Error('Not on a ZwiftPower event page');
   }
@@ -379,7 +378,6 @@ async function prepareSyncContext() {
 
   const ridersToSync = selectRidersToSync(allRiders, MAX_RIDERS_TO_SYNC);
   const fullEventName = categoryName ? `${eventName} - ${categoryName}` : eventName;
-  const raceKey = buildRaceKey(eventId, categoryId);
 
   const existingRace = await getExistingRaceData(raceKey);
   const existingRiderIds = new Set(existingRace?.riders?.map(r => r.zwiftId) || []);
@@ -483,8 +481,8 @@ async function finishCancelledSync(ctx, riderData, errors) {
   return raceResult;
 }
 
-async function syncRaceData(signal) {
-  const ctx = await prepareSyncContext();
+async function syncRaceData(target, signal) {
+  const ctx = await prepareSyncContext(target);
 
   if (ctx.newRidersToSync.length === 0) {
     await updateSyncStatus(ctx, {
@@ -544,8 +542,8 @@ async function runSync() {
 
   try {
     await updateSyncStatus(target, { status: 'starting' });
-    const data = await syncRaceData(signal);
-    return { success: true, data, cancelled: signal.aborted };
+    const data = await syncRaceData(target, signal);
+    return { success: true, raceKey: target.raceKey, data, cancelled: signal.aborted };
   } catch (error) {
     await updateSyncStatus(target, { status: 'error', error: error.message });
     return { success: false, error: error.message };
@@ -566,7 +564,7 @@ const replayControl = {
 const CONTROL_BUTTON_ACTIONS = {
   idle: () => startSyncFromControl({ openWhenDone: true }),
   error: () => startSyncFromControl({ openWhenDone: true }),
-  synced: () => requestOpenReplay(replayControl.raceKey),
+  synced: () => watchReplay(replayControl.raceKey),
 };
 
 const CONTROL_LINK_ACTIONS = {
@@ -579,11 +577,15 @@ function requestOpenReplay(raceKey) {
     .catch(error => console.log(`[ZP Replay] Could not open replay: ${error.message}`));
 }
 
+function watchReplay(raceKey) {
+  if (!watchInlineReplay(raceKey)) requestOpenReplay(raceKey);
+}
+
 async function startSyncFromControl({ openWhenDone }) {
   replayControl.elements.button.disabled = true;
   const result = await runSync();
   if (openWhenDone && result.success && !result.cancelled) {
-    requestOpenReplay(result.data.eventId);
+    watchReplay(result.raceKey);
   }
 }
 
@@ -687,6 +689,7 @@ function refreshReplayControl() {
   if (categoryChanged || !replayControl.elements.root.isConnected) {
     renderReplayControl();
   }
+  refreshInlineReplay(replayControl.raceKey);
 }
 
 function updateReplayControlData(values) {
@@ -704,6 +707,7 @@ function handleReplayStorageChange(changes, areaName) {
 
   updateReplayControlData(Object.fromEntries(keys.map(key => [key, changes[key].newValue])));
   renderReplayControl();
+  if (SYNCED_RACES_KEY in changes) handleInlineRacesChanged(changes[SYNCED_RACES_KEY].newValue);
 }
 
 function watchCategorySwitches() {
@@ -714,9 +718,14 @@ function watchCategorySwitches() {
   window.addEventListener('hashchange', refreshSoon);
 }
 
+function isOwnMutation({ target }) {
+  return Boolean(target.closest?.('.zp-replay-layer, .zp-replay-bar'));
+}
+
 function watchPageChanges() {
   const refresh = throttle(refreshReplayControl, CONTROL_MOUNT_THROTTLE_MS);
-  new MutationObserver(() => refresh()).observe(document.body, { childList: true, subtree: true });
+  const onMutations = mutations => { if (!mutations.every(isOwnMutation)) refresh(); };
+  new MutationObserver(onMutations).observe(document.body, { childList: true, subtree: true });
 }
 
 async function initReplayControl() {
@@ -726,6 +735,7 @@ async function initReplayControl() {
   replayControl.elements = createReplayControlElements();
   updateReplayControlData(await chrome.storage.local.get([SYNC_STATUS_KEY, SYNCED_RACES_KEY]));
   renderReplayControl();
+  refreshInlineReplay(replayControl.raceKey);
 
   chrome.storage.onChanged.addListener(handleReplayStorageChange);
   watchCategorySwitches();

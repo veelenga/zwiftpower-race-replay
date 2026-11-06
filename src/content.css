@@ -58,7 +58,10 @@
 }
 
 .zp-replay-button:focus-visible,
-.zp-replay-link:focus-visible {
+.zp-replay-link:focus-visible,
+.zp-replay-speed:focus-visible,
+.zp-replay-scrubber:focus-visible,
+.zp-replay-watch-select:focus-visible {
   outline: 2px solid rgba(31, 111, 235, 0.4);
   outline-offset: 2px;
 }
@@ -113,4 +116,229 @@
 
 .zp-replay-status.zp-replay-status-error {
   color: #cf222e;
+}
+
+.zp-replay-host {
+  position: relative;
+}
+
+.zp-replay-layer {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.zp-replay-layer .zp-replay-dot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: 8px;
+  height: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  background: rgba(140, 149, 159, 0.75);
+  line-height: 0;
+  translate: -50% -50%;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.zp-replay-layer .zp-replay-dot-group {
+  z-index: 2;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #0969da;
+  background: #54aeff;
+}
+
+.zp-replay-layer .zp-replay-dot-leader {
+  z-index: 3;
+  width: 11px;
+  height: 11px;
+  border-color: #9a6700;
+  background: #ffd33d;
+}
+
+.zp-replay-layer .zp-replay-dot-you {
+  z-index: 4;
+  width: 15px;
+  height: 15px;
+  border-width: 2px;
+  background: #1f6feb;
+}
+
+.zp-replay-layer .zp-replay-dot:hover,
+.zp-replay-layer .zp-replay-dot:focus-visible {
+  border-color: #1f2328;
+  outline: none;
+}
+
+.zp-replay-dot-you::after {
+  content: attr(data-label);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  margin-bottom: 2px;
+  color: #1f2328;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 2px #fff;
+  translate: -50%;
+}
+
+.zp-replay-layer .zp-replay-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(31, 35, 40, 0.92);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.zp-replay-tooltip-name {
+  font-weight: 600;
+}
+
+.zp-replay-edge-count {
+  position: absolute;
+  bottom: 6px;
+  color: #6a737d;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff;
+}
+
+.zp-replay-edge-count-behind {
+  left: 4px;
+}
+
+.zp-replay-edge-count-ahead {
+  right: 4px;
+}
+
+.zp-replay-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #f6f8fa;
+  color: #1f2328;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.zp-replay-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.zp-replay-bar .zp-replay-play {
+  min-width: 64px;
+  padding: 3px 10px;
+}
+
+.zp-replay-time {
+  min-width: 11ch;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.zp-replay-bar .zp-replay-scrubber {
+  display: block;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 80px;
+  margin: 0;
+  accent-color: #1f6feb;
+  cursor: pointer;
+}
+
+.zp-replay-speeds {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.zp-replay-bar .zp-replay-speed {
+  margin: 0 0 0 -1px;
+  padding: 2px 8px;
+  border: 1px solid #d0d7de;
+  background: #fff;
+  color: #1f2328;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.zp-replay-bar .zp-replay-speed:first-child {
+  margin-left: 0;
+  border-radius: 4px 0 0 4px;
+}
+
+.zp-replay-bar .zp-replay-speed:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.zp-replay-bar .zp-replay-speed[aria-pressed="true"] {
+  border-color: #1f6feb;
+  background: #1f6feb;
+  color: #fff;
+}
+
+.zp-replay-bar .zp-replay-watch {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  color: #57606a;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.zp-replay-bar .zp-replay-watch-select {
+  width: auto;
+  max-width: 240px;
+  min-width: 0;
+  height: auto;
+  margin: 0;
+  padding: 2px 4px;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  background: #fff;
+  color: #1f2328;
+  font: inherit;
+}
+
+.zp-replay-stats {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.zp-replay-open {
+  flex: 0 0 auto;
 }

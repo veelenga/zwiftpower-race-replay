@@ -30,10 +30,14 @@ function formatTime(seconds) {
  */
 function formatTimeGap(seconds) {
   if (seconds <= 0) return '-';
-  if (seconds < SECONDS_PER_MINUTE) return `+${seconds}s`;
+  return `+${formatGapDuration(seconds)}`;
+}
+
+function formatGapDuration(seconds) {
+  if (seconds < SECONDS_PER_MINUTE) return `${seconds}s`;
   const mins = Math.floor(seconds / SECONDS_PER_MINUTE);
   const secs = seconds % SECONDS_PER_MINUTE;
-  return `+${mins}:${String(secs).padStart(2, '0')}`;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
 /**
@@ -604,6 +608,7 @@ function sampleChartWindow(riders, time, { windowSeconds, stepSeconds, sampleInt
   return { labels, series };
 }
 
+const PLAYBACK_SPEEDS = [1, 5, 10, 30];
 const SEEK_STEP_SECONDS = 5;
 const SEEK_SHIFT_STEP_SECONDS = 30;
 const REPEATABLE_SHORTCUTS = ['seekBy', 'changeSpeed'];
@@ -657,6 +662,84 @@ function stepSpeed(speeds, current, step) {
   return speeds[clamp(index + step, 0, speeds.length - 1)];
 }
 
+function riderStandingAt(rider, time, sampleInterval) {
+  const samples = rider.distance || [];
+  const lastIndex = samples.length - 1;
+  const index = Math.min(timeToIndex(time, sampleInterval), lastIndex);
+  const finished = index === lastIndex;
+  return {
+    rider,
+    position: rider.position,
+    distance: samples,
+    currentDistance: samples[index] || 0,
+    currentPower: finished ? 0 : rider.power?.[index] || 0,
+    finished,
+    finishTime: Math.max(lastIndex, 0) * sampleInterval,
+  };
+}
+
+function compareStandings(a, b) {
+  if (a.finished !== b.finished) return a.finished ? -1 : 1;
+  return a.finished ? a.finishTime - b.finishTime : b.currentDistance - a.currentDistance;
+}
+
+function computeRaceStandings(riders, time, sampleInterval = 1) {
+  return riders.map(rider => riderStandingAt(rider, time, sampleInterval)).sort(compareStandings);
+}
+
+function calcStandingGap(ahead, behind, time, sampleInterval = 1) {
+  if (ahead.finished && behind.finished) return Math.round(behind.finishTime - ahead.finishTime);
+  return calcTimeGap(ahead, behind, time, sampleInterval);
+}
+
+function calcGapToGroupAhead(groups, groupIndex, watching, time, sampleInterval = 1) {
+  if (!watching || groupIndex <= 0) return 0;
+
+  const groupAhead = groups[groupIndex - 1];
+  return calcStandingGap(groupAhead.riders[groupAhead.riders.length - 1], watching, time, sampleInterval);
+}
+
+function advancePlaybackTime(time, elapsedMs, speed, maxTime) {
+  return clamp(time + (elapsedMs / MS_PER_SECOND) * speed, 0, maxTime);
+}
+
+function resolveWatchedRider(riders, selectedId) {
+  return riders.find(rider => rider.zwiftId === selectedId) ||
+    riders.find(rider => rider.isCurrentUser) ||
+    riders.reduce((best, rider) => (!best || rider.position < best.position ? rider : best), null);
+}
+
+function buildWatchOptions(riders) {
+  return [...riders]
+    .sort((a, b) => a.position - b.position)
+    .map(rider => ({
+      value: rider.zwiftId,
+      position: rider.position,
+      label: `#${rider.position} ${rider.name}${rider.isCurrentUser ? ' (you)' : ''}`,
+    }));
+}
+
+function shortRiderName(name) {
+  return String(name ?? '').trim().split(/\s+/)[0];
+}
+
+function formatGapTo(seconds, target) {
+  return seconds > 0 ? `${formatTimeGap(seconds)} to ${target}` : null;
+}
+
+function buildRiderStatsText({ rank, power, leaderPower, gapToLeader, gapToGroup, watchedGap }) {
+  return [
+    rank > 0 ? `#${rank}` : null,
+    Number.isFinite(power) ? `${power} W` : null,
+    Number.isFinite(leaderPower) ? `leader ${leaderPower} W` : null,
+    formatGapTo(gapToLeader, 'leader'),
+    formatGapTo(gapToGroup, 'group'),
+    watchedGap?.seconds > 0
+      ? `${formatGapDuration(watchedGap.seconds)} ${watchedGap.ahead ? 'ahead of' : 'behind'} ${watchedGap.name}`
+      : null,
+  ].filter(Boolean).join(' · ');
+}
+
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -697,6 +780,15 @@ if (typeof module !== 'undefined' && module.exports) {
     sampleChartWindow,
     resolveShortcut,
     stepSpeed,
+    computeRaceStandings,
+    calcStandingGap,
+    calcGapToGroupAhead,
+    advancePlaybackTime,
+    resolveWatchedRider,
+    buildWatchOptions,
+    shortRiderName,
+    formatGapTo,
+    buildRiderStatsText,
     // Constants
     SECONDS_PER_MINUTE,
     SECONDS_PER_HOUR,
@@ -709,6 +801,7 @@ if (typeof module !== 'undefined' && module.exports) {
     HASH_CATEGORY_PATTERN,
     URL_CATEGORY_PATTERN,
     EVENT_ID_PATTERN,
+    PLAYBACK_SPEEDS,
     SEEK_STEP_SECONDS,
     SEEK_SHIFT_STEP_SECONDS,
   };

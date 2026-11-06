@@ -6,6 +6,7 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
 
 - **Sync Race Data**: Automatically extracts rider data from ZwiftPower race pages
 - **Interactive Replay**: Watch the race unfold with real-time position updates
+- **Inline Replay**: Play the race on ZwiftPower's own course profile, right on the event page
 - **Group Detection**: Dynamic grouping based on time gaps (5-second threshold)
 - **Power Analysis**: Compare your power output against other riders or groups
 - **Course Profile**: Zoomable elevation profile with rider markers
@@ -44,7 +45,7 @@ A browser extension that lets you sync and replay Zwift races with detailed visu
 3. **Sync the Race**: Press "Replay race" next to the category buttons on the event page, or click the extension icon and press "Sync Race"
    - The extension syncs the top 50 riders + you (if outside top 50)
    - Progress is shown during sync
-4. **Open Replay**: A sync started from the page opens the replay when it finishes. Later, press "Watch replay" on the page or "Replay" in the popup
+4. **Watch Replay**: A sync started from the page plays the replay on the ZwiftPower course profile when it finishes. Later, press "Watch replay" on the page to play it again. Use "Open full replay" under the profile or "Replay" in the popup for the full replay page
 5. **Analyze**:
    - Use playback controls to navigate through the race
    - Click riders on the course profile or standings to change perspective
