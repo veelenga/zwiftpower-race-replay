@@ -46,7 +46,7 @@ module.exports = [
   {
     files: ['src/inline-replay.js'],
     languageOptions: {
-      globals: readonlyGlobals(['getExistingRaceData', 'requestOpenReplay', 'replayControl']),
+      globals: readonlyGlobals(['getExistingRaceData', 'replayControl']),
     },
   },
   {

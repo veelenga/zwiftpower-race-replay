@@ -338,7 +338,3 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-
-.zp-replay-open {
-  flex: 0 0 auto;
-}
