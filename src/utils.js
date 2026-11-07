@@ -21,6 +21,7 @@ const DISTANCE_SHIFT_FINE_KM = 0.01;
 const ELEVATION_SAMPLE_STRIDE = 5;
 const MIN_ELEVATION_PAIRS = 50;
 const MIN_ELEVATION_CORRELATION = 0.9;
+const FINISH_SNAP_KM = 0.15;
 const MAX_ELEVATION_RIDERS = 5;
 const MIN_CALIBRATION_RIDERS = 3;
 const GROUP_GAP_THRESHOLD_SECONDS = 3;
@@ -658,8 +659,9 @@ function calibrateRace(riders, course, sampleInterval = 1) {
   const finishRawKm = timed.length > 0 ? median(timed.map(rider => distanceAtTime(rider, rider.finishTime - offset, sampleInterval))) : null;
   const courseKm = course?.lengthKm ?? null;
   const anchorShift = finishRawKm !== null && courseKm !== null ? finishRawKm - courseKm : 0;
-  const maxShift = Math.max(DISTANCE_SHIFT_DEFAULT_MAX_KM, anchorShift + 1);
-  const shift = estimateDistanceShift(riders, course, maxShift) ?? anchorShift;
+  const fitted = estimateDistanceShift(riders, course, Math.max(DISTANCE_SHIFT_DEFAULT_MAX_KM, anchorShift + 1));
+  const nearProfileEnd = fitted !== null && courseKm !== null && Math.abs(fitted - anchorShift) <= FINISH_SNAP_KM;
+  const shift = fitted === null || nearProfileEnd ? anchorShift : fitted;
   const finishKm = finishRawKm !== null ? finishRawKm - shift : courseKm;
   return { offset, shift, finishKm, finishRawKm };
 }

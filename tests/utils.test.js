@@ -1090,6 +1090,13 @@ describe('calibrateRace', () => {
     expect(finishKm).toBeCloseTo(lineRawKm - startKm, 2);
   });
 
+  test('snaps the finish onto the profile end when the elevation fit lands close to it', () => {
+    const slightlyShort = { ...course, lengthKm: 9.9 };
+    expect(calibrateRace(riders, slightlyShort)).toMatchObject({ shift: expect.closeTo(0.18, 2), finishKm: expect.closeTo(9.9, 2) });
+    const farOff = { ...course, lengthKm: 9.5 };
+    expect(calibrateRace(riders, farOff)).toMatchObject({ shift: expect.closeTo(startKm, 2), finishKm: expect.closeTo(10, 2) });
+  });
+
   test('anchors the finish to the profile end when the elevation does not match', () => {
     const flat = { xs: course.xs, ys: course.xs.map(() => 5), lengthKm: 10 };
     expect(estimateDistanceShift(riders, flat)).toBeNull();
