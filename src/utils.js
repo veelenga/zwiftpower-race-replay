@@ -553,17 +553,105 @@ function formatGapTo(seconds, target) {
   return seconds > 0 ? `${formatTimeGap(seconds)} to ${target}` : null;
 }
 
-function buildRiderStatsText({ rank, power, leaderPower, gapToLeader, gapToGroup, watchedGap }) {
+function formatRiderGap(gap, relation) {
+  return gap?.seconds > 0 ? `${formatGapDuration(gap.seconds)} ${relation} ${gap.name}` : null;
+}
+
+function formatOrdinal(rank) {
+  const tens = rank % 100;
+  const suffix = tens >= 11 && tens <= 13 ? 'th' : { 1: 'st', 2: 'nd', 3: 'rd' }[rank % 10] ?? 'th';
+  return `${rank}${suffix}`;
+}
+
+function buildRiderStatsParts({ rank, power, gapToLeader, gapToGroup, ahead, behind, watchedGap }) {
   return [
-    rank > 0 ? `#${rank}` : null,
+    rank > 0 ? formatOrdinal(rank) : null,
     Number.isFinite(power) ? `${power} W` : null,
-    Number.isFinite(leaderPower) ? `leader ${leaderPower} W` : null,
     formatGapTo(gapToLeader, 'leader'),
     formatGapTo(gapToGroup, 'group'),
-    watchedGap?.seconds > 0
-      ? `${formatGapDuration(watchedGap.seconds)} ${watchedGap.ahead ? 'ahead of' : 'behind'} ${watchedGap.name}`
-      : null,
-  ].filter(Boolean).join(' · ');
+    formatRiderGap(ahead, 'behind'),
+    formatRiderGap(behind, 'ahead of'),
+    watchedGap ? formatRiderGap(watchedGap, watchedGap.ahead ? 'ahead of' : 'behind') : null,
+  ].filter(Boolean);
+}
+
+function buildRiderStatsText(stats) {
+  return buildRiderStatsParts(stats).join(' · ');
+}
+
+function riderGap(ahead, behind, named, time, sampleInterval) {
+  return { name: shortRiderName(named.rider.name), seconds: calcStandingGap(ahead, behind, time, sampleInterval) };
+}
+
+function nearestRiderGaps(standings, youIndex, time, sampleInterval = 1) {
+  const you = standings[youIndex];
+  if (!you) return {};
+  const ahead = standings[youIndex - 1];
+  const behind = standings[youIndex + 1];
+  return {
+    ahead: ahead && riderGap(ahead, you, ahead, time, sampleInterval),
+    behind: behind && riderGap(you, behind, behind, time, sampleInterval),
+  };
+}
+
+function groupGapAhead(groups, index, time, sampleInterval) {
+  if (index === 0) return 0;
+  const ahead = groups[index - 1].riders;
+  return calcStandingGap(ahead[ahead.length - 1], groups[index].riders[0], time, sampleInterval);
+}
+
+function stripGroupIndexes(total, yourGroupIndex) {
+  const wanted = yourGroupIndex < 0 ? [0, 1, 2, 3] : [0, yourGroupIndex - 1, yourGroupIndex, yourGroupIndex + 1];
+  return new Set(wanted.filter(index => index >= 0 && index < total));
+}
+
+function groupChipLabel(group, isYou) {
+  const [first] = group.riders;
+  const who = group.riders.length === 1 ? shortRiderName(first.rider.name) : `${group.name} · ${group.riders.length} riders`;
+  return `${who}${isYou ? ' (you)' : ''} · ${group.avgPower} W`;
+}
+
+function foldedChip(folded) {
+  const riders = folded.reduce((sum, group) => sum + group.riders.length, 0);
+  const label = riders === folded.length ? `+${riders} solo` : `+${folded.length} groups · ${riders} riders`;
+  return { type: 'fold', label, gap: folded[0].gap };
+}
+
+function assignDotLanes(xs, spacing, maxLanes) {
+  const order = xs.map((x, index) => index).sort((a, b) => xs[b] - xs[a]);
+  const laneEdge = [];
+  const lanes = new Array(xs.length).fill(0);
+  order.forEach(index => {
+    const x = xs[index];
+    let lane = laneEdge.findIndex(edge => edge - x >= spacing);
+    if (lane < 0 && laneEdge.length < maxLanes) lane = laneEdge.length;
+    if (lane < 0) lane = laneEdge.indexOf(Math.max(...laneEdge));
+    laneEdge[lane] = x;
+    lanes[index] = lane;
+  });
+  return lanes;
+}
+
+function buildGroupStrip(groups, yourGroupIndex, time, sampleInterval = 1) {
+  const visible = stripGroupIndexes(groups.length, yourGroupIndex);
+  const items = [];
+  let folded = [];
+  const flush = () => {
+    if (folded.length > 0) items.push(foldedChip(folded));
+    folded = [];
+  };
+  groups.forEach((group, index) => {
+    const gap = groupGapAhead(groups, index, time, sampleInterval);
+    if (!visible.has(index)) {
+      folded.push({ ...group, gap });
+      return;
+    }
+    flush();
+    const isYou = index === yourGroupIndex;
+    items.push({ type: 'group', index, gap, isYou, label: groupChipLabel(group, isYou), zwiftId: group.riders[0].rider.zwiftId });
+  });
+  flush();
+  return items;
 }
 
 // Export for testing and module use
@@ -603,6 +691,12 @@ if (typeof module !== 'undefined' && module.exports) {
     buildWatchOptions,
     shortRiderName,
     buildRiderStatsText,
+    buildRiderStatsParts,
+    formatOrdinal,
+    nearestRiderGaps,
+    buildGroupStrip,
+    assignDotLanes,
+    formatGapDuration,
     DEFAULT_SPEED_KMH,
     MAX_POSITION,
     PLAYBACK_SPEEDS,

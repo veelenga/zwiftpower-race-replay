@@ -133,15 +133,15 @@
   top: 0;
   left: 0;
   z-index: 1;
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   min-width: 0;
   margin: 0;
   padding: 0;
   overflow: visible;
   border: 1.5px solid #fff;
   border-radius: 50%;
-  background: rgba(140, 149, 159, 0.75);
+  background: #8c959f;
   line-height: 0;
   translate: -50% -50%;
   cursor: pointer;
@@ -150,24 +150,24 @@
 
 .zp-replay-layer .zp-replay-dot-group {
   z-index: 2;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border: 1px solid #0969da;
   background: #54aeff;
 }
 
 .zp-replay-layer .zp-replay-dot-leader {
   z-index: 3;
-  width: 11px;
-  height: 11px;
+  width: 13px;
+  height: 13px;
   border-color: #9a6700;
   background: #ffd33d;
 }
 
 .zp-replay-layer .zp-replay-dot-you {
   z-index: 4;
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
   border-width: 2px;
   background: #1f6feb;
 }
@@ -233,33 +233,42 @@
 .zp-replay-bar {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   margin: 8px 0;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border: 1px solid #d0d7de;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #f6f8fa;
   color: #1f2328;
   font-size: 12px;
   line-height: 1.5;
 }
 
-.zp-replay-bar-row {
+.zp-replay-transport {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
 .zp-replay-bar .zp-replay-play {
-  min-width: 64px;
-  padding: 3px 10px;
+  min-width: 72px;
+  padding: 4px 12px;
 }
 
 .zp-replay-time {
-  min-width: 11ch;
+  min-width: 12ch;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.zp-replay-time-now {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.zp-replay-time-total {
+  color: #57606a;
 }
 
 .zp-replay-bar .zp-replay-scrubber {
@@ -279,7 +288,7 @@
 
 .zp-replay-bar .zp-replay-speed {
   margin: 0 0 0 -1px;
-  padding: 2px 8px;
+  padding: 2px 9px;
   border: 1px solid #d0d7de;
   background: #fff;
   color: #1f2328;
@@ -303,38 +312,156 @@
   color: #fff;
 }
 
-.zp-replay-bar .zp-replay-watch {
-  display: inline-flex;
-  flex: 0 1 auto;
-  align-items: center;
-  gap: 6px;
+.zp-replay-panels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   min-width: 0;
+}
+
+.zp-replay-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 12px 8px;
+  border: 1px solid #d8dee4;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.zp-replay-panel-watch {
+  flex: 0 0 360px;
   max-width: 100%;
+}
+
+.zp-replay-panel-groups {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.zp-replay-bar .zp-replay-caption {
   margin: 0;
   color: #57606a;
+  font-size: 11px;
   font-weight: normal;
-  white-space: nowrap;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
 }
 
 .zp-replay-bar .zp-replay-watch-select {
-  width: auto;
-  max-width: 240px;
+  width: calc(100% + 4px);
+  max-width: none;
   min-width: 0;
   height: auto;
-  margin: 0;
-  padding: 2px 4px;
-  border: 1px solid #d0d7de;
+  margin: 0 0 0 -4px;
+  padding: 1px 4px;
+  border: 1px solid transparent;
   border-radius: 4px;
   background: #fff;
   color: #1f2328;
   font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.zp-replay-bar .zp-replay-watch-select:hover,
+.zp-replay-bar .zp-replay-watch-select:focus-visible {
+  border-color: #d0d7de;
 }
 
 .zp-replay-stats {
-  flex: 1 1 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  column-gap: 6px;
+  min-height: 36px;
+  font-variant-numeric: tabular-nums;
+}
+
+.zp-replay-stat {
+  white-space: nowrap;
+}
+
+.zp-replay-stat:first-child {
+  font-weight: 600;
+}
+
+.zp-replay-stat + .zp-replay-stat::before {
+  content: "·";
+  margin-right: 6px;
+  color: #8c959f;
+}
+
+.zp-replay-layer .zp-replay-dot-hot {
+  z-index: 5;
+  border-color: #1f2328;
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.35);
+}
+
+.zp-replay-groups {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  overflow: hidden;
+  min-height: 26px;
+  overflow-x: auto;
+  padding: 2px 0;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  text-overflow: ellipsis;
+}
+
+.zp-replay-bar .zp-replay-group {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 2px 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 12px;
+  background: #f6f8fa;
+  color: #1f2328;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.zp-replay-bar button.zp-replay-group {
+  cursor: pointer;
+}
+
+.zp-replay-bar button.zp-replay-group:hover,
+.zp-replay-bar button.zp-replay-group:focus-visible {
+  border-color: #1f2328;
+  outline: none;
+}
+
+.zp-replay-bar .zp-replay-group-lead {
+  border-color: #d4a72c;
+  background: #fff8c5;
+}
+
+.zp-replay-bar .zp-replay-group-you {
+  border-color: #1f6feb;
+  background: #ddf4ff;
+  font-weight: 600;
+}
+
+.zp-replay-bar .zp-replay-group-fold {
+  border-style: dashed;
+  color: #57606a;
+}
+
+.zp-replay-gap {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  color: #57606a;
+  font-size: 11px;
+}
+
+.zp-replay-gap::before,
+.zp-replay-gap::after {
+  content: "";
+  width: 10px;
+  border-top: 1px solid #afb8c1;
 }
