@@ -10,6 +10,7 @@ const MS_PER_SECOND = 1000;
 const DEFAULT_SPEED_KMH = 40;
 const MIN_SPEED_KMH = 10;
 const GROUP_GAP_THRESHOLD_SECONDS = 5;
+const GROUP_MAX_SPAN_SECONDS = 20;
 const MAX_POSITION = 200;
 
 /**
@@ -161,10 +162,11 @@ function detectGroups(standings, time, watchingPosition, sampleInterval = 1) {
   for (let i = 1; i < standings.length; i++) {
     const prevRider = standings[i - 1];
     const rider = standings[i];
-    const distanceGapKm = prevRider.currentDistance - rider.currentDistance;
-    const timeGap = calcTimeGapFromDistance(distanceGapKm, rider, time, sampleInterval);
+    const gapToRider = km => calcTimeGapFromDistance(km - rider.currentDistance, rider, time, sampleInterval);
+    const timeGap = gapToRider(prevRider.currentDistance);
+    const span = gapToRider(currentGroup[0].currentDistance);
 
-    if (timeGap <= GROUP_GAP_THRESHOLD_SECONDS) {
+    if (timeGap <= GROUP_GAP_THRESHOLD_SECONDS && span <= GROUP_MAX_SPAN_SECONDS) {
       currentGroup.push(rider);
     } else {
       groups.push(currentGroup);

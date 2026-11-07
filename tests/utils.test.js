@@ -222,6 +222,18 @@ describe('detectGroups', () => {
     expect(groups[1].riders.length).toBe(1);
   });
 
+  test('splits a long line of riders even when each gap is small', () => {
+    const standings = Array.from({ length: 12 }, (_, i) => ({
+      position: i + 1,
+      currentDistance: 10 - i * 0.03,
+      currentPower: 300,
+    }));
+    const groups = detectGroups(standings, 60, 1);
+    expect(groups.length).toBe(2);
+    expect(groups[0].riders.length).toBe(8);
+    expect(groups[1].riders.length).toBe(4);
+  });
+
   test('marks group containing watched rider', () => {
     const standings = [
       { position: 1, currentDistance: 10.0, currentPower: 300 },
