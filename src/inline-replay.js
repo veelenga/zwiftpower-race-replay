@@ -1,5 +1,6 @@
 const INLINE_GRAPH_SELECTOR = '#segment_graph';
 const INLINE_PROFILE_ATTRIBUTE = 'data-zp-profile';
+const INLINE_COURSE_ATTRIBUTE = 'data-zp-course';
 const INLINE_HOST_CLASS = 'zp-replay-host';
 const INLINE_DEFAULT_SPEED = 10;
 const INLINE_TOOLTIP_EDGE_PX = 90;
@@ -59,7 +60,8 @@ function stepLabel(seconds) {
 const inlineReplay = {
   raceKey: null,
   rawRiders: [],
-  courseKm: null,
+  courseJson: null,
+  finishKm: null,
   riders: [],
   selectedId: null,
   sampleInterval: 1,
@@ -76,6 +78,10 @@ const inlineReplay = {
 
 function readProfile(graph) {
   return graph && JSON.parse(graph.getAttribute(INLINE_PROFILE_ATTRIBUTE));
+}
+
+function inlineGraph() {
+  return inlineGraph();
 }
 
 function dotIdFrom(target) {
@@ -200,7 +206,7 @@ function isInlineViewCurrent(graph) {
 }
 
 function ensureInlineView() {
-  const graph = document.querySelector(INLINE_GRAPH_SELECTOR);
+  const graph = inlineGraph();
   const profile = inlineReplay.riders.length > 0 && readProfile(graph);
   if (!profile) {
     unmountInlineView();
@@ -212,7 +218,7 @@ function ensureInlineView() {
   }
   const { view } = inlineReplay;
   view.profile = profile;
-  applyCourse(profile.courseKm);
+  applyCourse(graph.getAttribute(INLINE_COURSE_ATTRIBUTE));
   Object.assign(view.layer.style, {
     left: `${profile.plotLeft}px`,
     top: `${profile.plotTop}px`,
@@ -223,8 +229,13 @@ function ensureInlineView() {
   return true;
 }
 
-function placeFinishLine({ finish }, { xMin, xMax, plotWidth, courseKm }) {
-  const x = ((courseKm - xMin) / (xMax - xMin)) * plotWidth;
+function finishKmFor({ courseKm }) {
+  return inlineReplay.finishKm ?? courseKm;
+}
+
+function placeFinishLine({ finish }, profile) {
+  const { xMin, xMax, plotWidth } = profile;
+  const x = ((finishKmFor(profile) - xMin) / (xMax - xMin)) * plotWidth;
   finish.hidden = !(x >= 0 && x <= plotWidth);
   finish.style.transform = `translateX(${x}px)`;
 }
@@ -261,8 +272,10 @@ function inlineSnapshot() {
   };
 }
 
-function placeStanding(standing, { xMin, xMax, plotWidth, plotTop, courseKm, ys }) {
-  const km = standing.finished ? courseKm : clamp(standing.currentDistance, 0, courseKm);
+function placeStanding(standing, profile) {
+  const { xMin, xMax, plotWidth, plotTop, ys } = profile;
+  const finishKm = finishKmFor(profile);
+  const km = standing.finished ? finishKm : clamp(standing.currentDistance, 0, finishKm);
   const x = ((km - xMin) / (xMax - xMin)) * plotWidth;
   const side = km < xMin ? 'behind' : km > xMax ? 'ahead' : null;
   return { side, x, y: ys[clamp(Math.round(x), 0, ys.length - 1)] - plotTop };
@@ -468,31 +481,38 @@ function selectWatchedRider(zwiftId) {
   renderInlineFrame();
 }
 
-function applyCourse(courseKm) {
-  if (courseKm === inlineReplay.courseKm) return;
-  inlineReplay.courseKm = courseKm;
-  inlineReplay.riders = normalizeRiders(inlineReplay.rawRiders, courseKm, inlineReplay.sampleInterval);
+function applyCourse(courseJson) {
+  if (courseJson === inlineReplay.courseJson) return;
+  const { rawRiders, sampleInterval } = inlineReplay;
+  const course = courseJson ? JSON.parse(courseJson) : null;
+  const calibration = calibrateRace(rawRiders, course, sampleInterval);
+  const riders = normalizeRiders(rawRiders, calibration);
+  Object.assign(inlineReplay, {
+    courseJson,
+    riders,
+    finishKm: calibration.finishKm,
+    maxTime: raceDuration(riders, sampleInterval),
+  });
+  inlineReplay.time = Math.min(inlineReplay.time, inlineReplay.maxTime);
 }
 
 function setInlineRace(raceKey, race) {
   const isNewRace = raceKey !== inlineReplay.raceKey;
   const rawRiders = (race?.riders || []).filter(rider => rider.distance?.length > 0);
   const sampleInterval = rawRiders[0]?.sampleInterval || 1;
-  const maxTime = raceDuration(rawRiders, sampleInterval);
   if (isNewRace) unmountInlineView();
   Object.assign(inlineReplay, {
     raceKey,
     rawRiders,
-    courseKm: null,
+    courseJson: undefined,
     sampleInterval,
-    maxTime,
     selectedId: isNewRace ? null : inlineReplay.selectedId,
     hoveredId: isNewRace ? null : inlineReplay.hoveredId,
     hoveredGroup: isNewRace ? null : inlineReplay.hoveredGroup,
     linked: isNewRace ? new Set() : inlineReplay.linked,
-    time: isNewRace ? 0 : Math.min(inlineReplay.time, maxTime),
+    time: isNewRace ? 0 : inlineReplay.time,
   });
-  applyCourse(readProfile(document.querySelector(INLINE_GRAPH_SELECTOR))?.courseKm ?? null);
+  applyCourse(inlineGraph()?.getAttribute(INLINE_COURSE_ATTRIBUTE) ?? null);
   renderInlineReplay();
 }
 
@@ -505,7 +525,7 @@ async function loadInlineRace(raceKey) {
 
 function refreshInlineReplay(raceKey) {
   if (raceKey !== inlineReplay.raceKey) loadInlineRace(raceKey);
-  else if (!isInlineViewCurrent(document.querySelector(INLINE_GRAPH_SELECTOR))) renderInlineReplay();
+  else if (!isInlineViewCurrent(inlineGraph())) renderInlineReplay();
 }
 
 function handleInlineRacesChanged(races) {
@@ -520,7 +540,7 @@ async function startInlineReplay(raceKey) {
 }
 
 function watchInlineReplay(raceKey) {
-  const canWatch = raceKey === replayControl.raceKey && Boolean(readProfile(document.querySelector(INLINE_GRAPH_SELECTOR)));
+  const canWatch = raceKey === replayControl.raceKey && Boolean(readProfile(inlineGraph()));
   if (canWatch) startInlineReplay(raceKey);
   return canWatch;
 }

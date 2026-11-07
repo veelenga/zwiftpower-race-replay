@@ -1,6 +1,7 @@
 (() => {
   const GRAPH_ID = 'segment_graph';
   const PROFILE_ATTRIBUTE = 'data-zp-profile';
+  const COURSE_ATTRIBUTE = 'data-zp-course';
   const POLL_INTERVAL_MS = 250;
   const POLL_TIMEOUT_MS = 30000;
 
@@ -28,12 +29,21 @@
     if (chart.renderTo.getAttribute(PROFILE_ATTRIBUTE) !== json) chart.renderTo.setAttribute(PROFILE_ATTRIBUTE, json);
   }
 
+  function publishCourse(chart) {
+    const series = chart.series.find(({ type }) => type === 'areaspline') ?? chart.series[0];
+    if (!series?.xData?.length) return;
+    const xs = series.xData;
+    chart.renderTo.setAttribute(COURSE_ATTRIBUTE, JSON.stringify({ xs, ys: series.yData, lengthKm: xs[xs.length - 1] }));
+  }
+
   function attach(chart) {
     const { renderTo } = chart;
+    publishCourse(chart);
     publish(chart);
     window.Highcharts.addEvent(chart, 'redraw', () => publish(chart));
     window.Highcharts.addEvent(chart, 'destroy', () => {
       renderTo.removeAttribute(PROFILE_ATTRIBUTE);
+      renderTo.removeAttribute(COURSE_ATTRIBUTE);
       setTimeout(() => waitForChart(), POLL_INTERVAL_MS);
     });
   }

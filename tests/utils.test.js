@@ -31,6 +31,9 @@ const {
   resolveShortcut,
   computeRaceStandings,
   normalizeRiders,
+  calibrateRace,
+  estimateClockOffset,
+  estimateDistanceShift,
   raceDuration,
   calcStandingGap,
   calcGapToGroupAhead,
@@ -1032,24 +1035,52 @@ describe('computeRaceStandings with official finish times', () => {
 });
 
 describe('normalizeRiders', () => {
-  const rider = { zwiftId: 'a', finishTime: 4, distance: [0.1, 1.1, 2.1, 3.1, 4.1, 5.1] };
+  const rider = { zwiftId: 'a', finishTime: 100, distance: [0.1, 1.1, 2.1] };
 
-  test('scales each rider so the official finish lands on the course length', () => {
-    const [scaled] = normalizeRiders([rider], 2);
-    expect(scaled.distance.map(km => +km.toFixed(3))).toEqual([0, 0.5, 1, 1.5, 2, 2.5]);
-    expect(scaled.finishDistance).toBe(2);
+  test('shifts distance, moves the finish onto the series clock and pins the finish distance', () => {
+    const [moved] = normalizeRiders([rider], { offset: 30, shift: 0.1, finishKm: 28.6 });
+    expect(moved.distance.map(km => +km.toFixed(3))).toEqual([0, 1, 2]);
+    expect(moved).toMatchObject({ finishTime: 70, officialTime: 100, finishDistance: 28.6 });
     expect(rider.distance[0]).toBe(0.1);
   });
 
-  test('extrapolates when the series stops before the official finish', () => {
-    const short = { zwiftId: 'b', finishTime: 6, distance: [0, 1, 2, 3] };
-    const [scaled] = normalizeRiders([short], 12);
-    expect(scaled.distance).toEqual([0, 2, 4, 6]);
+  test('leaves riders without an official time unfinished by time', () => {
+    const [plain] = normalizeRiders([{ distance: [0.1, 1.1] }], { offset: 30, shift: 0.1, finishKm: 28.6 });
+    expect(plain.finishTime).toBeUndefined();
+    expect(plain.finishDistance).toBeUndefined();
+  });
+});
+
+describe('calibrateRace', () => {
+  const lineRawKm = 10.08;
+  const startKm = 0.08;
+  const clockOffset = 30;
+  const makeRider = kmPerSecond => {
+    const lineAt = (lineRawKm - startKm) / kmPerSecond;
+    const distance = Array.from({ length: Math.round(lineAt) + 20 }, (_, i) => +(startKm + i * kmPerSecond).toFixed(4));
+    return { finishTime: lineAt + clockOffset, distance, elevation: distance.map(km => Math.round((km - startKm) * 10)) };
+  };
+  const riders = [0.010, 0.011, 0.012, 0.013, 0.014].map(makeRider);
+  const course = { xs: Array.from({ length: 1001 }, (_, i) => i / 100), ys: Array.from({ length: 1001 }, (_, i) => Math.round(i / 10)), lengthKm: 10 };
+
+  test('finds the clock offset that puts every rider on the same line at their official time', () => {
+    expect(estimateClockOffset(riders)).toBeCloseTo(clockOffset, 0);
+    const { offset, shift, finishKm } = calibrateRace(riders, null);
+    expect(offset).toBeCloseTo(clockOffset, 0);
+    expect(shift).toBe(0);
+    expect(finishKm).toBeCloseTo(lineRawKm, 2);
   });
 
-  test('leaves riders alone without a finish time or a course length', () => {
-    expect(normalizeRiders([{ distance: [0, 1] }], 2)[0]).toEqual({ distance: [0, 1] });
-    expect(normalizeRiders([rider], null)[0]).toBe(rider);
+  test('aligns rider elevation with the course profile to find the distance shift', () => {
+    expect(estimateDistanceShift(riders, course)).toBeCloseTo(startKm, 2);
+    const { shift, finishKm } = calibrateRace(riders, course);
+    expect(shift).toBeCloseTo(startKm, 2);
+    expect(finishKm).toBeCloseTo(lineRawKm - startKm, 2);
+  });
+
+  test('falls back to no offset with too few timed riders', () => {
+    expect(estimateClockOffset([riders[0]])).toBe(0);
+    expect(calibrateRace([], null)).toEqual({ offset: 0, shift: 0, finishKm: null });
   });
 });
 
