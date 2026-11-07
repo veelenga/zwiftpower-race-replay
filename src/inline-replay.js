@@ -64,7 +64,6 @@ const inlineReplay = {
   finishKm: null,
   riders: [],
   selectedId: null,
-  sampleInterval: 1,
   maxTime: 0,
   time: 0,
   speed: INLINE_DEFAULT_SPEED,
@@ -254,10 +253,10 @@ function syncInlineDots(view) {
 }
 
 function inlineSnapshot() {
-  const { riders, time, sampleInterval, selectedId } = inlineReplay;
+  const { riders, time, selectedId } = inlineReplay;
   const watched = resolveWatchedRider(riders, selectedId);
-  const standings = computeRaceStandings(riders, time, sampleInterval);
-  const { groups, linked } = trackGroups(standings, time, watched?.position, { sampleInterval, linked: inlineReplay.linked });
+  const standings = computeRaceStandings(riders, time);
+  const { groups, linked } = trackGroups(standings, time, watched?.position, inlineReplay.linked);
   inlineReplay.linked = linked;
   const yourGroupIndex = groups.findIndex(group => group.hasYou);
   const idsOf = group => new Set(group?.riders.map(standing => standing.rider.zwiftId));
@@ -329,7 +328,7 @@ function watchedGapFor(index, { standings, youIndex, time }) {
   const you = standings[youIndex];
   const ahead = index < youIndex;
   const [front, back] = ahead ? [standings[index], you] : [you, standings[index]];
-  const seconds = calcStandingGap(front, back, time, inlineReplay.sampleInterval);
+  const seconds = gapBetween(front, back, time);
   return { seconds, ahead, name: shortRiderName(you.rider.name) };
 }
 
@@ -343,7 +342,7 @@ function renderInlineTooltip(view, snapshot) {
   view.tooltipStats.textContent = buildRiderStatsText({
     rank: index + 1,
     power: standing.currentPower,
-    gapToLeader: calcStandingGap(snapshot.standings[0], standing, snapshot.time, inlineReplay.sampleInterval),
+    gapToLeader: gapBetween(snapshot.standings[0], standing, snapshot.time),
     watchedGap: watchedGapFor(index, snapshot),
   });
   view.tooltip.style.transform = tooltipTransform(point, view.profile.plotWidth);
@@ -351,14 +350,13 @@ function renderInlineTooltip(view, snapshot) {
 
 function watchedStatsParts({ standings, groups, youIndex, yourGroupIndex, time }) {
   if (youIndex < 0) return [];
-  const { sampleInterval } = inlineReplay;
   const you = standings[youIndex];
   return buildRiderStatsParts({
     rank: youIndex + 1,
     power: you.currentPower,
-    gapToLeader: calcStandingGap(standings[0], you, time, sampleInterval),
-    gapToGroup: calcGapToGroupAhead(groups, yourGroupIndex, you, time, sampleInterval),
-    ...nearestRiderGaps(standings, youIndex, time, sampleInterval),
+    gapToLeader: gapBetween(standings[0], you, time),
+    gapToGroup: gapToGroupAhead(groups, yourGroupIndex, you, time),
+    ...nearestRiderGaps(standings, youIndex, time),
   });
 }
 
@@ -377,7 +375,7 @@ function renderWatchedStats({ bar }, snapshot) {
 }
 
 function renderGroupStrip({ bar }, { groups, yourGroupIndex, time }) {
-  const markup = buildGroupStrip(groups, yourGroupIndex, time, inlineReplay.sampleInterval).map(groupChipMarkup).join('');
+  const markup = buildGroupStrip(groups, yourGroupIndex, time).map(groupChipMarkup).join('');
   if (markup === bar.groupsMarkup) return;
   bar.groupsMarkup = markup;
   bar.groups.innerHTML = markup;
@@ -483,15 +481,15 @@ function selectWatchedRider(zwiftId) {
 
 function applyCourse(courseJson) {
   if (courseJson === inlineReplay.courseJson) return;
-  const { rawRiders, sampleInterval } = inlineReplay;
+  const { rawRiders } = inlineReplay;
   const course = courseJson ? JSON.parse(courseJson) : null;
-  const calibration = calibrateRace(rawRiders, course, sampleInterval);
-  const riders = normalizeRiders(rawRiders, calibration, sampleInterval);
+  const calibration = calibrateRace(rawRiders, course);
+  const riders = normalizeRiders(rawRiders, calibration);
   Object.assign(inlineReplay, {
     courseJson,
     riders,
     finishKm: calibration.finishKm,
-    maxTime: raceDuration(riders, sampleInterval),
+    maxTime: raceDuration(riders),
   });
   inlineReplay.time = Math.min(inlineReplay.time, inlineReplay.maxTime);
 }
@@ -499,13 +497,11 @@ function applyCourse(courseJson) {
 function setInlineRace(raceKey, race) {
   const isNewRace = raceKey !== inlineReplay.raceKey;
   const rawRiders = (race?.riders || []).filter(rider => rider.distance?.length > 0);
-  const sampleInterval = rawRiders[0]?.sampleInterval || 1;
   if (isNewRace) unmountInlineView();
   Object.assign(inlineReplay, {
     raceKey,
     rawRiders,
     courseJson: undefined,
-    sampleInterval,
     selectedId: isNewRace ? null : inlineReplay.selectedId,
     hoveredId: isNewRace ? null : inlineReplay.hoveredId,
     hoveredGroup: isNewRace ? null : inlineReplay.hoveredGroup,
