@@ -60,6 +60,7 @@
 .zp-replay-button:focus-visible,
 .zp-replay-link:focus-visible,
 .zp-replay-speed:focus-visible,
+.zp-replay-step:focus-visible,
 .zp-replay-scrubber:focus-visible,
 .zp-replay-watch-select:focus-visible {
   outline: 2px solid rgba(31, 111, 235, 0.4);
@@ -254,6 +255,43 @@
 .zp-replay-bar .zp-replay-play {
   min-width: 72px;
   padding: 4px 12px;
+}
+
+.zp-replay-steps {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.zp-replay-bar .zp-replay-step {
+  margin: 0 0 0 -1px;
+  padding: 2px 8px;
+  border: 1px solid #d0d7de;
+  background: #fff;
+  color: #1f2328;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.zp-replay-bar .zp-replay-step:first-child {
+  margin-left: 0;
+  border-radius: 4px 0 0 4px;
+}
+
+.zp-replay-bar .zp-replay-step:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.zp-replay-bar .zp-replay-step:hover,
+.zp-replay-bar .zp-replay-step:active {
+  border-color: #1f6feb;
+  color: #1f6feb;
+}
+
+.zp-replay-bar .zp-replay-step:active {
+  background: #ddf4ff;
 }
 
 .zp-replay-time {
