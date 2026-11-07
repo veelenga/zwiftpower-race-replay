@@ -9,6 +9,7 @@ const {
   extractZwiftId,
   calcSpeed,
   calcTimeGapFromDistance,
+  calcTimeGap,
   detectGroups,
   trackGroups,
   selectRidersToSync,
@@ -30,6 +31,11 @@ const {
   throttle,
   resolveShortcut,
   computeRaceStandings,
+  normalizeRiders,
+  calibrateRace,
+  estimateClockOffset,
+  estimateDistanceShift,
+  raceDuration,
   calcStandingGap,
   calcGapToGroupAhead,
   advancePlaybackTime,
@@ -153,10 +159,14 @@ describe('calcSpeed', () => {
   });
 
   test('calculates speed from distance data', () => {
-    // 1 km between idx 9 and 10 in 1 second = 3600 km/h
     const rider = { distance: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] };
-    const speed = calcSpeed(rider, 10);
-    expect(speed).toBe(3600);
+    expect(calcSpeed(rider, 10)).toBe(3600);
+  });
+
+  test('averages over the last few samples to smooth coarse distance steps', () => {
+    const rider = { distance: [0, 0.01, 0.03, 0.04, 0.06, 0.07, 0.09, 0.10, 0.12, 0.13, 0.15] };
+    expect(calcSpeed(rider, 10)).toBeCloseTo(((0.15 - 0.07) / 5) * 3600, 5);
+    expect(calcSpeed(rider, 9)).toBeCloseTo(((0.13 - 0.06) / 5) * 3600, 5);
   });
 
   test('enforces minimum speed', () => {
@@ -164,6 +174,22 @@ describe('calcSpeed', () => {
     const rider = { distance: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
     const speed = calcSpeed(rider, 10);
     expect(speed).toBe(10); // MIN_SPEED_KMH
+  });
+});
+
+describe('calcTimeGap', () => {
+  const ahead = { distance: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6] };
+  const behind = { distance: [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4] };
+
+  test('reads the gap as the time until the trailing rider reaches the leader\'s spot', () => {
+    expect(calcTimeGap(ahead, behind, 2)).toBe(2);
+    expect(calcTimeGap(ahead, behind, 4)).toBe(4);
+    expect(calcTimeGap({ currentDistance: 0.19 }, behind, 2)).toBe(2);
+  });
+
+  test('is zero when the trailing rider is level or ahead, and falls back to speed when never reached', () => {
+    expect(calcTimeGap(behind, ahead, 2)).toBe(0);
+    expect(calcTimeGap({ currentDistance: 9 }, behind, 2)).toBe(Math.round(((9 - 0.1) / DEFAULT_SPEED_KMH) * 3600));
   });
 });
 
@@ -1007,6 +1033,108 @@ describe('computeRaceStandings', () => {
   test('scales time by the sample interval', () => {
     const standings = computeRaceStandings(riders, 2, 2);
     expect(standings.find(s => s.position === 3).currentDistance).toBe(0.5);
+  });
+});
+
+describe('computeRaceStandings with official finish times', () => {
+  const early = { position: 2, zwiftId: 'early', finishTime: 10.4, distance: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], power: Array(13).fill(300) };
+  const winner = { position: 1, zwiftId: 'winner', finishTime: 10.2, distance: [0, 1, 2, 3, 4, 5, 6, 7, 8], power: Array(9).fill(300) };
+
+  test('finishes a rider at the official time even when the series is shorter or longer', () => {
+    const standings = computeRaceStandings([early, winner], 10.3);
+    expect(standings.map(s => s.position)).toEqual([1, 2]);
+    expect(standings[0]).toMatchObject({ finished: true, finishTime: 10.2, currentPower: 0 });
+    expect(standings[1]).toMatchObject({ finished: false, currentDistance: 10 });
+  });
+
+  test('orders finished riders by official time and keeps the official gap', () => {
+    const standings = computeRaceStandings([early, winner], 20);
+    expect(standings.map(s => s.position)).toEqual([1, 2]);
+    expect(calcStandingGap(standings[0], standings[1], 20)).toBe(0);
+    expect(calcStandingGap({ finished: true, finishTime: 2353.4 }, { finished: true, finishTime: 2355.1 }, 2400)).toBe(2);
+  });
+});
+
+describe('normalizeRiders', () => {
+  const rider = { zwiftId: 'a', finishTime: 5, distance: [0.1, 1.1, 2.1, 3.1, 4.1], power: [200, 200, 200, 200, 0], heartRate: [120, 121, 122, 123, 124], elevation: [1, 2, 3, 4, 5] };
+
+  test('pads the series onto the official clock, shifts distance and scales it onto the measured line', () => {
+    const [moved] = normalizeRiders([rider], { offset: 2, shift: 0.1, finishKm: 3.3, finishRawKm: 3.1 });
+    expect(moved.distance.map(km => +km.toFixed(2))).toEqual([0, 0, 0, 1.1, 2.2, 3.3, 4.4]);
+    expect(moved.power).toEqual([0, 0, 200, 200, 200, 200, 0]);
+    expect(moved.heartRate).toEqual([120, 120, 120, 121, 122, 123, 124]);
+    expect(moved.elevation).toEqual([1, 1, 1, 2, 3, 4, 5]);
+    expect(moved).toMatchObject({ finishTime: 5, finishDistance: 3.3 });
+    expect(rider.distance[0]).toBe(0.1);
+  });
+
+  test('leaves riders without an official time unscaled and unfinished by time', () => {
+    const [plain] = normalizeRiders([{ distance: [0.1, 1.1] }], { offset: 1, shift: 0.1, finishKm: 3.3, finishRawKm: 3.1 });
+    expect(plain.distance.map(km => +km.toFixed(2))).toEqual([0, 0, 1]);
+    expect(plain.finishTime).toBeUndefined();
+    expect(plain.finishDistance).toBeUndefined();
+  });
+});
+
+describe('calibrateRace', () => {
+  const lineRawKm = 10.08;
+  const startKm = 0.08;
+  const clockOffset = 30;
+  const bump = km => Math.round(50 + 40 * Math.sin(km * 1.7) + 20 * Math.cos(km * 5.1));
+  const makeRider = (kmPerSecond, { stopPower = false } = {}) => {
+    const lineAt = (lineRawKm - startKm) / kmPerSecond;
+    const length = Math.round(lineAt) + 20;
+    const distance = Array.from({ length }, (_, i) => +(startKm + i * kmPerSecond).toFixed(4));
+    const power = Array.from({ length }, (_, i) => (stopPower && i > Math.round(lineAt) ? 0 : 250));
+    return { finishTime: lineAt + clockOffset, distance, power, elevation: distance.map(km => bump(km - startKm)) };
+  };
+  const riders = [0.010, 0.011, 0.012, 0.013, 0.014].map(speed => makeRider(speed));
+  const course = { xs: Array.from({ length: 1001 }, (_, i) => i / 100), ys: Array.from({ length: 1001 }, (_, i) => 2 * bump(i / 100) + 7), lengthKm: 10 };
+
+  test('reads the clock offset from where riders stop pedalling', () => {
+    const stopping = [0.010, 0.011, 0.012].map(speed => makeRider(speed, { stopPower: true }));
+    expect(estimateClockOffset(stopping)).toBeCloseTo(clockOffset - 1, 0);
+  });
+
+  test('falls back to the offset that puts every rider on the same line at their official time', () => {
+    expect(estimateClockOffset(riders)).toBeCloseTo(clockOffset, 0);
+    const { offset, shift, finishKm } = calibrateRace(riders, null);
+    expect(offset).toBeCloseTo(clockOffset, 0);
+    expect(shift).toBe(0);
+    expect(finishKm).toBeCloseTo(lineRawKm, 2);
+  });
+
+  test('aligns the shape of rider elevation with the course profile, whatever its scale', () => {
+    expect(estimateDistanceShift(riders, course)).toBeCloseTo(startKm, 2);
+    const { shift, finishKm } = calibrateRace(riders, course);
+    expect(shift).toBeCloseTo(startKm, 2);
+    expect(finishKm).toBeCloseTo(lineRawKm - startKm, 2);
+  });
+
+  test('snaps the finish onto the profile end when the elevation fit lands close to it', () => {
+    const slightlyShort = { ...course, lengthKm: 9.9 };
+    expect(calibrateRace(riders, slightlyShort)).toMatchObject({ shift: expect.closeTo(0.18, 2), finishKm: expect.closeTo(9.9, 2) });
+    const farOff = { ...course, lengthKm: 9.5 };
+    expect(calibrateRace(riders, farOff)).toMatchObject({ shift: expect.closeTo(startKm, 2), finishKm: expect.closeTo(10, 2) });
+  });
+
+  test('anchors the finish to the profile end when the elevation does not match', () => {
+    const flat = { xs: course.xs, ys: course.xs.map(() => 5), lengthKm: 10 };
+    expect(estimateDistanceShift(riders, flat)).toBeNull();
+    expect(calibrateRace(riders, flat).shift).toBeCloseTo(lineRawKm - 10, 2);
+  });
+
+  test('falls back to no offset with too few timed riders', () => {
+    expect(estimateClockOffset([riders[0]])).toBe(0);
+    expect(calibrateRace([], null)).toEqual({ offset: 0, shift: 0, finishKm: null, finishRawKm: null });
+  });
+});
+
+describe('raceDuration', () => {
+  test('runs until the last official finish or the end of the longest series', () => {
+    expect(raceDuration([{ distance: [0, 1, 2], finishTime: 5 }, { distance: Array(8).fill(0) }])).toBe(7);
+    expect(raceDuration([{ distance: [0, 1, 2], finishTime: 9 }])).toBe(9);
+    expect(raceDuration([])).toBe(0);
   });
 });
 

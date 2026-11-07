@@ -5,6 +5,7 @@
 
 const ZWIFTPOWER_EVENT_PATTERN = /zwiftpower\.com\/events\.php\?zid=(\d+)/;
 const ZWIFTPOWER_API_BASE = 'https://zwiftpower.com/api3.php';
+const ZWIFTPOWER_RESULTS_BASE = 'https://zwiftpower.com/cache3/results';
 const MAX_RIDERS_TO_SYNC = 50;
 const DELAY_BETWEEN_REQUESTS_MS = 1500;
 const HIGHLIGHTED_ROW_CLASS = 'pointed';
@@ -362,6 +363,31 @@ function beginSync() {
   return currentSyncAbortController.signal;
 }
 
+async function fetchFinishTimes(eventId) {
+  try {
+    const response = await fetch(`${ZWIFTPOWER_RESULTS_BASE}/${eventId}_view.json`, ANALYSIS_REQUEST_OPTIONS);
+    const { data } = await response.json();
+    return new Map(data.map(row => [String(row.zwid), Number(row.time?.[0])]).filter(([, time]) => time > 0));
+  } catch (error) {
+    console.log(`[ZP Replay] Finish times unavailable: ${error.message}`);
+    return new Map();
+  }
+}
+
+function withFinishTime(rider, finishTimes) {
+  const finishTime = finishTimes.get(rider.zwiftId);
+  return rider.finishTime > 0 || !(finishTime > 0) ? rider : { ...rider, finishTime };
+}
+
+async function backfillFinishTimes(ctx) {
+  const race = ctx.existingRace;
+  const riders = race.riders.map(rider => withFinishTime(rider, ctx.finishTimes));
+  if (riders.every((rider, i) => rider === race.riders[i])) return race;
+  const updated = { ...race, riders };
+  await saveRaceData(updated);
+  return updated;
+}
+
 async function prepareSyncContext({ eventId, raceKey }) {
   if (!eventId) {
     throw new Error('Not on a ZwiftPower event page');
@@ -379,7 +405,7 @@ async function prepareSyncContext({ eventId, raceKey }) {
   const ridersToSync = selectRidersToSync(allRiders, MAX_RIDERS_TO_SYNC);
   const fullEventName = categoryName ? `${eventName} - ${categoryName}` : eventName;
 
-  const existingRace = await getExistingRaceData(raceKey);
+  const [existingRace, finishTimes] = await Promise.all([getExistingRaceData(raceKey), fetchFinishTimes(eventId)]);
   const existingRiderIds = new Set(existingRace?.riders?.map(r => r.zwiftId) || []);
   const newRidersToSync = ridersToSync.filter(r => !existingRiderIds.has(r.zwiftId));
 
@@ -391,20 +417,21 @@ async function prepareSyncContext({ eventId, raceKey }) {
     ridersToSync,
     newRidersToSync,
     existingRace,
+    finishTimes,
     currentUserZwiftId,
     categoryId,
     categoryName,
   };
 }
 
-function createRiderWithAnalysis(rider, analysis) {
-  return {
+function createRiderWithAnalysis(rider, analysis, finishTimes) {
+  return withFinishTime({
     position: rider.position,
     name: rider.name,
     zwiftId: rider.zwiftId,
     isCurrentUser: rider.isCurrentUser,
     ...analysis,
-  };
+  }, finishTimes);
 }
 
 function createRaceResult(ctx, riderData, errors, syncProgress, syncInProgress) {
@@ -462,7 +489,7 @@ async function syncRiders(ctx, riderData, errors, signal) {
     }
 
     consecutiveFailures = 0;
-    riderData.push(createRiderWithAnalysis(rider, analysis));
+    riderData.push(createRiderWithAnalysis(rider, analysis, ctx.finishTimes));
     await saveRaceData(createRaceResult(ctx, riderData, errors, { current: i + 1, total }, true));
   }
 }
@@ -485,18 +512,19 @@ async function syncRaceData(target, signal) {
   const ctx = await prepareSyncContext(target);
 
   if (ctx.newRidersToSync.length === 0) {
+    const race = await backfillFinishTimes(ctx);
     await updateSyncStatus(ctx, {
       status: 'complete',
       eventName: ctx.fullEventName,
-      successfulSyncs: ctx.existingRace.riders.length,
+      successfulSyncs: race.riders.length,
       totalRiders: ctx.allRiders.length,
       errors: 0,
       message: 'All riders already synced',
     });
-    return ctx.existingRace;
+    return race;
   }
 
-  const riderData = [...(ctx.existingRace?.riders || [])];
+  const riderData = (ctx.existingRace?.riders || []).map(rider => withFinishTime(rider, ctx.finishTimes));
   const errors = [];
 
   try {
