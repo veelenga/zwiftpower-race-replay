@@ -9,6 +9,7 @@ const {
   extractZwiftId,
   calcSpeed,
   calcTimeGapFromDistance,
+  calcTimeGap,
   detectGroups,
   trackGroups,
   selectRidersToSync,
@@ -158,10 +159,14 @@ describe('calcSpeed', () => {
   });
 
   test('calculates speed from distance data', () => {
-    // 1 km between idx 9 and 10 in 1 second = 3600 km/h
     const rider = { distance: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] };
-    const speed = calcSpeed(rider, 10);
-    expect(speed).toBe(3600);
+    expect(calcSpeed(rider, 10)).toBe(3600);
+  });
+
+  test('averages over the last few samples to smooth coarse distance steps', () => {
+    const rider = { distance: [0, 0.01, 0.03, 0.04, 0.06, 0.07, 0.09, 0.10, 0.12, 0.13, 0.15] };
+    expect(calcSpeed(rider, 10)).toBeCloseTo(((0.15 - 0.07) / 5) * 3600, 5);
+    expect(calcSpeed(rider, 9)).toBeCloseTo(((0.13 - 0.06) / 5) * 3600, 5);
   });
 
   test('enforces minimum speed', () => {
@@ -169,6 +174,22 @@ describe('calcSpeed', () => {
     const rider = { distance: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
     const speed = calcSpeed(rider, 10);
     expect(speed).toBe(10); // MIN_SPEED_KMH
+  });
+});
+
+describe('calcTimeGap', () => {
+  const ahead = { distance: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6] };
+  const behind = { distance: [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4] };
+
+  test('reads the gap as the time until the trailing rider reaches the leader\'s spot', () => {
+    expect(calcTimeGap(ahead, behind, 2)).toBe(2);
+    expect(calcTimeGap(ahead, behind, 4)).toBe(4);
+    expect(calcTimeGap({ currentDistance: 0.19 }, behind, 2)).toBe(2);
+  });
+
+  test('is zero when the trailing rider is level or ahead, and falls back to speed when never reached', () => {
+    expect(calcTimeGap(behind, ahead, 2)).toBe(0);
+    expect(calcTimeGap({ currentDistance: 9 }, behind, 2)).toBe(Math.round(((9 - 0.1) / DEFAULT_SPEED_KMH) * 3600));
   });
 });
 

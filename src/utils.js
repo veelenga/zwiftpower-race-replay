@@ -29,6 +29,7 @@ const GROUP_GAP_RELEASE_SECONDS = 5;
 const GROUP_MAX_SPAN_SECONDS = 20;
 const GROUP_MAX_SPAN_RELEASE_SECONDS = 25;
 const MAX_POSITION = 200;
+const SPEED_WINDOW_SAMPLES = 5;
 
 /**
  * Format seconds into mm:ss string
@@ -122,14 +123,31 @@ function calcSpeed(rider, time, sampleInterval = 1) {
   const MIN_TIME_FOR_SPEED = 3;
   if (!rider.distance || time < MIN_TIME_FOR_SPEED) return DEFAULT_SPEED_KMH;
 
-  const idx = timeToIndex(time, sampleInterval);
-  const prevIdx = Math.max(0, idx - 1);
+  const idx = Math.min(timeToIndex(time, sampleInterval), rider.distance.length - 1);
+  const window = Math.min(SPEED_WINDOW_SAMPLES, Math.max(idx, 1));
+  const prevIdx = Math.max(0, idx - window);
   const d1 = rider.distance[prevIdx] || 0;
   const d2 = rider.distance[idx] || d1;
-  const speedKmPerSec = (d2 - d1) / sampleInterval;
+  const speedKmPerSec = (d2 - d1) / ((idx - prevIdx || 1) * sampleInterval);
   const speedKmh = speedKmPerSec * SECONDS_PER_HOUR;
 
   return Math.max(speedKmh, MIN_SPEED_KMH);
+}
+
+function secondsUntilReached(rider, km, time, sampleInterval = 1) {
+  const samples = rider.distance;
+  if (!samples?.length || samples[samples.length - 1] < km) return null;
+  let low = Math.min(timeToIndex(time, sampleInterval), samples.length - 1);
+  if (samples[low] >= km) return 0;
+  let high = samples.length - 1;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (samples[mid] >= km) high = mid;
+    else low = mid + 1;
+  }
+  const before = samples[low - 1];
+  const fraction = samples[low] > before ? (km - before) / (samples[low] - before) : 1;
+  return Math.max(0, (low - 1 + fraction) * sampleInterval - time);
 }
 
 /**
@@ -158,8 +176,10 @@ function calcTimeGap(riderA, riderB, time, sampleInterval = 1) {
   if (time === 0) return 0;
   const distA = riderA.currentDistance ?? riderA.distance?.[timeToIndex(time, sampleInterval)] ?? 0;
   const distB = riderB.currentDistance ?? riderB.distance?.[timeToIndex(time, sampleInterval)] ?? 0;
-  const distanceKm = distA - distB;
-  return calcTimeGapFromDistance(distanceKm, riderB, time, sampleInterval);
+  if (distA <= distB) return 0;
+  const reached = secondsUntilReached(riderB, distA, time, sampleInterval);
+  if (reached !== null) return Math.round(reached);
+  return calcTimeGapFromDistance(distA - distB, riderB, time, sampleInterval);
 }
 
 /**
@@ -873,6 +893,7 @@ if (typeof module !== 'undefined' && module.exports) {
     extractZwiftId,
     calcSpeed,
     calcTimeGapFromDistance,
+    calcTimeGap,
     detectGroups,
     trackGroups,
     selectRidersToSync,
