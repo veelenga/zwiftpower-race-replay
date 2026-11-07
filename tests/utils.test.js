@@ -38,6 +38,7 @@ const {
   buildRiderStatsText,
   nearestRiderGaps,
   buildGroupStrip,
+  assignDotLanes,
   DEFAULT_SPEED_KMH,
   SEEK_STEP_SECONDS,
   SEEK_SHIFT_STEP_SECONDS,
@@ -1129,5 +1130,16 @@ describe('buildGroupStrip', () => {
   test('shows the first four groups when nobody is watched', () => {
     expect(buildGroupStrip(groups, -1, 60).map(item => item.type)).toEqual(['group', 'group', 'group', 'group', 'fold']);
     expect(buildGroupStrip([], -1, 60)).toEqual([]);
+  });
+});
+
+describe('assignDotLanes', () => {
+  test('moves dots that would overlap to the next lane', () => {
+    expect(assignDotLanes([100, 95, 50, 92, 40], 10, 3)).toEqual([0, 1, 0, 2, 0]);
+  });
+
+  test('reuses the least crowded lane once all lanes are taken', () => {
+    expect(assignDotLanes([10, 9, 8, 7, 6], 5, 3)).toEqual([0, 1, 2, 0, 1]);
+    expect(assignDotLanes([], 5, 3)).toEqual([]);
   });
 });

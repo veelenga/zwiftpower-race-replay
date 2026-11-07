@@ -133,15 +133,15 @@
   top: 0;
   left: 0;
   z-index: 1;
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   min-width: 0;
   margin: 0;
   padding: 0;
   overflow: visible;
   border: 1.5px solid #fff;
   border-radius: 50%;
-  background: rgba(140, 149, 159, 0.75);
+  background: #8c959f;
   line-height: 0;
   translate: -50% -50%;
   cursor: pointer;
@@ -150,24 +150,24 @@
 
 .zp-replay-layer .zp-replay-dot-group {
   z-index: 2;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border: 1px solid #0969da;
   background: #54aeff;
 }
 
 .zp-replay-layer .zp-replay-dot-leader {
   z-index: 3;
-  width: 11px;
-  height: 11px;
+  width: 13px;
+  height: 13px;
   border-color: #9a6700;
   background: #ffd33d;
 }
 
 .zp-replay-layer .zp-replay-dot-you {
   z-index: 4;
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
   border-width: 2px;
   background: #1f6feb;
 }

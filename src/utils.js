@@ -607,6 +607,21 @@ function foldedChip(folded) {
   return { type: 'fold', label, gap: folded[0].gap };
 }
 
+function assignDotLanes(xs, spacing, maxLanes) {
+  const order = xs.map((x, index) => index).sort((a, b) => xs[b] - xs[a]);
+  const laneEdge = [];
+  const lanes = new Array(xs.length).fill(0);
+  order.forEach(index => {
+    const x = xs[index];
+    let lane = laneEdge.findIndex(edge => edge - x >= spacing);
+    if (lane < 0 && laneEdge.length < maxLanes) lane = laneEdge.length;
+    if (lane < 0) lane = laneEdge.indexOf(Math.max(...laneEdge));
+    laneEdge[lane] = x;
+    lanes[index] = lane;
+  });
+  return lanes;
+}
+
 function buildGroupStrip(groups, yourGroupIndex, time, sampleInterval = 1) {
   const visible = stripGroupIndexes(groups.length, yourGroupIndex);
   const items = [];
@@ -668,6 +683,7 @@ if (typeof module !== 'undefined' && module.exports) {
     buildRiderStatsText,
     nearestRiderGaps,
     buildGroupStrip,
+    assignDotLanes,
     formatGapDuration,
     DEFAULT_SPEED_KMH,
     MAX_POSITION,

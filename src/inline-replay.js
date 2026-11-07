@@ -5,6 +5,9 @@ const INLINE_DEFAULT_SPEED = 10;
 const INLINE_TOOLTIP_EDGE_PX = 90;
 const INLINE_TOOLTIP_FLIP_PX = 56;
 const INLINE_TOOLTIP_GAP_PX = 10;
+const INLINE_DOT_SPACING_PX = 12;
+const INLINE_LANE_STEP_PX = 12;
+const INLINE_MAX_LANES = 3;
 const INLINE_HOVER_EVENTS = [
   ['mouseover', 'target'],
   ['focusin', 'target'],
@@ -232,20 +235,28 @@ function dotRole(index, zwiftId, { youIndex, groupIds }) {
   return groupIds.has(zwiftId) ? 'group' : 'muted';
 }
 
-function renderInlineDots(view, snapshot) {
+function placeVisibleDots(view, snapshot) {
   const hidden = { behind: 0, ahead: 0 };
+  const placed = [];
   snapshot.standings.forEach((standing, index) => {
-    const { zwiftId } = standing.rider;
-    const dot = view.dots.get(zwiftId);
-    const { side, x, y } = placeStanding(standing, view.profile);
-    dot.hidden = Boolean(side);
-    if (side) {
-      hidden[side]++;
-      return;
-    }
-    dot.className = `zp-replay-dot zp-replay-dot-${dotRole(index, zwiftId, snapshot)}`;
-    dot.classList.toggle('zp-replay-dot-hot', snapshot.hotIds.has(zwiftId));
-    dot.style.transform = `translate(${x}px, ${y}px)`;
+    const point = placeStanding(standing, view.profile);
+    if (point.side) hidden[point.side]++;
+    else placed.push({ standing, index, role: dotRole(index, standing.rider.zwiftId, snapshot), ...point });
+  });
+  return { hidden, placed };
+}
+
+function renderInlineDots(view, snapshot) {
+  const { hidden, placed } = placeVisibleDots(view, snapshot);
+  const lanes = assignDotLanes(placed.map(dot => dot.x), INLINE_DOT_SPACING_PX, INLINE_MAX_LANES);
+  view.dots.forEach(dot => { dot.hidden = true; });
+  placed.forEach((dot, i) => {
+    const { zwiftId } = dot.standing.rider;
+    const element = view.dots.get(zwiftId);
+    element.hidden = false;
+    element.className = `zp-replay-dot zp-replay-dot-${dot.role}`;
+    element.classList.toggle('zp-replay-dot-hot', snapshot.hotIds.has(zwiftId));
+    element.style.transform = `translate(${dot.x}px, ${dot.y - lanes[i] * INLINE_LANE_STEP_PX}px)`;
   });
   Object.entries(hidden).forEach(([side, count]) => {
     view[side].hidden = count === 0;
