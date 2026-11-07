@@ -211,8 +211,8 @@ describe('detectGroups', () => {
   test('separates riders into groups based on gap', () => {
     const standings = [
       { position: 1, currentDistance: 10.0, currentPower: 300, distance: [] },
-      { position: 2, currentDistance: 9.99, currentPower: 280, distance: [] },
-      { position: 3, currentDistance: 9.5, currentPower: 270, distance: [] }, // ~180s gap at 10 km/h
+      { position: 2, currentDistance: 9.995, currentPower: 280, distance: [] },
+      { position: 3, currentDistance: 9.5, currentPower: 270, distance: [] },
     ];
     const groups = detectGroups(standings, 60, 1);
     expect(groups.length).toBe(2);
