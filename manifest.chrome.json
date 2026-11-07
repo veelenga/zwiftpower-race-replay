@@ -5,8 +5,7 @@
   "description": "Analyze and replay your Zwift races with detailed visualizations",
   "permissions": [
     "storage",
-    "unlimitedStorage",
-    "activeTab"
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "https://zwiftpower.com/*"
