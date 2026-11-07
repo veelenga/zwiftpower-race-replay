@@ -81,7 +81,7 @@ function readProfile(graph) {
 }
 
 function inlineGraph() {
-  return inlineGraph();
+  return document.querySelector(INLINE_GRAPH_SELECTOR);
 }
 
 function dotIdFrom(target) {
