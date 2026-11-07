@@ -65,6 +65,7 @@ const inlineReplay = {
   speed: INLINE_DEFAULT_SPEED,
   frameId: null,
   stepTimer: null,
+  linked: new Set(),
   hoveredId: null,
   hoveredGroup: null,
   view: null,
@@ -233,7 +234,8 @@ function inlineSnapshot() {
   const { riders, time, sampleInterval, selectedId } = inlineReplay;
   const watched = resolveWatchedRider(riders, selectedId);
   const standings = computeRaceStandings(riders, time, sampleInterval);
-  const groups = detectGroups(standings, time, watched?.position, sampleInterval);
+  const { groups, linked } = trackGroups(standings, time, watched?.position, { sampleInterval, linked: inlineReplay.linked });
+  inlineReplay.linked = linked;
   const yourGroupIndex = groups.findIndex(group => group.hasYou);
   const idsOf = group => new Set(group?.riders.map(standing => standing.rider.zwiftId));
   return {
@@ -468,6 +470,7 @@ function setInlineRace(raceKey, race) {
     selectedId: isNewRace ? null : inlineReplay.selectedId,
     hoveredId: isNewRace ? null : inlineReplay.hoveredId,
     hoveredGroup: isNewRace ? null : inlineReplay.hoveredGroup,
+    linked: isNewRace ? new Set() : inlineReplay.linked,
     time: isNewRace ? 0 : Math.min(inlineReplay.time, maxTime),
   });
   renderInlineReplay();

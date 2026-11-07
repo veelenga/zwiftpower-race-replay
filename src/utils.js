@@ -10,7 +10,9 @@ const MS_PER_SECOND = 1000;
 const DEFAULT_SPEED_KMH = 40;
 const MIN_SPEED_KMH = 10;
 const GROUP_GAP_THRESHOLD_SECONDS = 5;
+const GROUP_GAP_RELEASE_SECONDS = 8;
 const GROUP_MAX_SPAN_SECONDS = 20;
+const GROUP_MAX_SPAN_RELEASE_SECONDS = 25;
 const MAX_POSITION = 200;
 
 /**
@@ -153,8 +155,13 @@ function calcTimeGap(riderA, riderB, time, sampleInterval = 1) {
  * @param {number} sampleInterval - Sample interval
  * @returns {Array} Array of group objects
  */
-function detectGroups(standings, time, watchingPosition, sampleInterval = 1) {
-  if (standings.length === 0) return [];
+function standingId(standing) {
+  return standing.rider?.zwiftId ?? standing.position;
+}
+
+function trackGroups(standings, time, watchingPosition, { sampleInterval = 1, linked = new Set() } = {}) {
+  const nextLinked = new Set();
+  if (standings.length === 0) return { groups: [], linked: nextLinked };
 
   const groups = [];
   let currentGroup = [standings[0]];
@@ -162,24 +169,33 @@ function detectGroups(standings, time, watchingPosition, sampleInterval = 1) {
   for (let i = 1; i < standings.length; i++) {
     const prevRider = standings[i - 1];
     const rider = standings[i];
+    const pair = `${standingId(prevRider)}|${standingId(rider)}`;
+    const wasLinked = linked.has(pair);
     const gapToRider = km => calcTimeGapFromDistance(km - rider.currentDistance, rider, time, sampleInterval);
     const timeGap = gapToRider(prevRider.currentDistance);
     const span = gapToRider(currentGroup[0].currentDistance);
+    const maxGap = wasLinked ? GROUP_GAP_RELEASE_SECONDS : GROUP_GAP_THRESHOLD_SECONDS;
+    const maxSpan = wasLinked ? GROUP_MAX_SPAN_RELEASE_SECONDS : GROUP_MAX_SPAN_SECONDS;
 
-    if (timeGap <= GROUP_GAP_THRESHOLD_SECONDS && span <= GROUP_MAX_SPAN_SECONDS) {
+    if (timeGap <= maxGap && span <= maxSpan) {
       currentGroup.push(rider);
+      nextLinked.add(pair);
     } else {
       groups.push(currentGroup);
       currentGroup = [rider];
     }
   }
 
-  if (currentGroup.length > 0) {
-    groups.push(currentGroup);
-  }
+  groups.push(currentGroup);
 
-  const leader = standings[0];
+  return { groups: describeGroups(groups, standings[0], time, watchingPosition, sampleInterval), linked: nextLinked };
+}
 
+function detectGroups(standings, time, watchingPosition, sampleInterval = 1) {
+  return trackGroups(standings, time, watchingPosition, { sampleInterval }).groups;
+}
+
+function describeGroups(groups, leader, time, watchingPosition, sampleInterval) {
   return groups.map((groupRiders, idx) => {
     const avgPower = Math.round(
       groupRiders.reduce((sum, r) => sum + r.currentPower, 0) / groupRiders.length
@@ -679,6 +695,7 @@ if (typeof module !== 'undefined' && module.exports) {
     calcSpeed,
     calcTimeGapFromDistance,
     detectGroups,
+    trackGroups,
     selectRidersToSync,
     clamp,
     escapeHtml,

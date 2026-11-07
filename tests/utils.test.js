@@ -10,6 +10,7 @@ const {
   calcSpeed,
   calcTimeGapFromDistance,
   detectGroups,
+  trackGroups,
   selectRidersToSync,
   clamp,
   escapeHtml,
@@ -232,6 +233,22 @@ describe('detectGroups', () => {
     expect(groups.length).toBe(2);
     expect(groups[0].riders.length).toBe(8);
     expect(groups[1].riders.length).toBe(4);
+  });
+
+  test('keeps a rider in the group until the gap clearly opens', () => {
+    const standingsAt = km => [
+      { position: 1, currentDistance: 10.0, currentPower: 300 },
+      { position: 2, currentDistance: 10.0 - km, currentPower: 280 },
+    ];
+    const sevenSeconds = (7 / 3600) * DEFAULT_SPEED_KMH;
+    const nineSeconds = (9 / 3600) * DEFAULT_SPEED_KMH;
+    const together = trackGroups(standingsAt(0.01), 60, 1);
+    expect(together.groups.length).toBe(1);
+    expect(trackGroups(standingsAt(sevenSeconds), 60, 1, { linked: together.linked }).groups.length).toBe(1);
+    expect(trackGroups(standingsAt(sevenSeconds), 60, 1).groups.length).toBe(2);
+    const apart = trackGroups(standingsAt(nineSeconds), 60, 1, { linked: together.linked });
+    expect(apart.groups.length).toBe(2);
+    expect(trackGroups(standingsAt(sevenSeconds), 60, 1, { linked: apart.linked }).groups.length).toBe(2);
   });
 
   test('marks group containing watched rider', () => {
