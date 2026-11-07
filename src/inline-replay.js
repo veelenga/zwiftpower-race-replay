@@ -486,7 +486,7 @@ function applyCourse(courseJson) {
   const { rawRiders, sampleInterval } = inlineReplay;
   const course = courseJson ? JSON.parse(courseJson) : null;
   const calibration = calibrateRace(rawRiders, course, sampleInterval);
-  const riders = normalizeRiders(rawRiders, calibration);
+  const riders = normalizeRiders(rawRiders, calibration, sampleInterval);
   Object.assign(inlineReplay, {
     courseJson,
     riders,

@@ -11,9 +11,16 @@ const DEFAULT_SPEED_KMH = 40;
 const MIN_SPEED_KMH = 10;
 const CLOCK_OFFSET_MAX_SECONDS = 180;
 const CLOCK_OFFSET_STEP_SECONDS = 0.5;
-const DISTANCE_SHIFT_MAX_KM = 0.5;
-const DISTANCE_SHIFT_STEP_KM = 0.01;
+const STOP_SEARCH_FRACTION = 0.8;
+const STOP_PEDALLING_WATTS = 50;
+const STOP_QUIET_WATTS = 30;
+const STOP_QUIET_SAMPLES = 5;
+const DISTANCE_SHIFT_DEFAULT_MAX_KM = 1;
+const DISTANCE_SHIFT_COARSE_KM = 0.05;
+const DISTANCE_SHIFT_FINE_KM = 0.01;
 const ELEVATION_SAMPLE_STRIDE = 5;
+const MIN_ELEVATION_PAIRS = 50;
+const MIN_ELEVATION_CORRELATION = 0.9;
 const MAX_ELEVATION_RIDERS = 5;
 const MIN_CALIBRATION_RIDERS = 3;
 const GROUP_GAP_THRESHOLD_SECONDS = 3;
@@ -553,21 +560,43 @@ function timedRiders(riders) {
   return riders.filter(rider => rider.finishTime > 0 && rider.distance?.length > 1);
 }
 
+function pedalStopIndex(power = []) {
+  for (let i = power.length - 1; i > power.length * STOP_SEARCH_FRACTION; i--) {
+    if (power[i] <= STOP_PEDALLING_WATTS) continue;
+    const after = power.slice(i + 1, i + 1 + STOP_QUIET_SAMPLES);
+    return after.length === STOP_QUIET_SAMPLES && after.every(watts => watts < STOP_QUIET_WATTS) ? i + 1 : -1;
+  }
+  return -1;
+}
+
+function offsetFromPedalStops(riders, sampleInterval) {
+  const offsets = riders
+    .map(rider => ({ rider, stop: pedalStopIndex(rider.power) }))
+    .filter(({ stop }) => stop > 0)
+    .map(({ rider, stop }) => rider.finishTime - stop * sampleInterval)
+    .filter(offset => offset >= 0 && offset <= CLOCK_OFFSET_MAX_SECONDS);
+  return offsets.length >= MIN_CALIBRATION_RIDERS ? median(offsets) : null;
+}
+
 function finishSpread(riders, offset, sampleInterval) {
   const kms = riders.map(rider => distanceAtTime(rider, rider.finishTime - offset, sampleInterval));
   const mid = median(kms);
   return median(kms.map(km => Math.abs(km - mid)));
 }
 
-function estimateClockOffset(riders, sampleInterval = 1) {
-  const timed = timedRiders(riders);
-  if (timed.length < MIN_CALIBRATION_RIDERS) return 0;
+function offsetFromFinishSpread(riders, sampleInterval) {
   let best = { offset: 0, spread: Infinity };
   for (let offset = 0; offset <= CLOCK_OFFSET_MAX_SECONDS; offset += CLOCK_OFFSET_STEP_SECONDS) {
-    const spread = finishSpread(timed, offset, sampleInterval);
+    const spread = finishSpread(riders, offset, sampleInterval);
     if (spread < best.spread) best = { offset, spread };
   }
   return best.offset;
+}
+
+function estimateClockOffset(riders, sampleInterval = 1) {
+  const timed = timedRiders(riders);
+  if (timed.length < MIN_CALIBRATION_RIDERS) return 0;
+  return offsetFromPedalStops(timed, sampleInterval) ?? offsetFromFinishSpread(timed, sampleInterval);
 }
 
 function courseElevationAt({ xs, ys }, km) {
@@ -581,33 +610,46 @@ function courseElevationAt({ xs, ys }, km) {
   return ys[low];
 }
 
-function elevationError(rider, course, shift) {
+function elevationCorrelation(rider, course, shift) {
   const lastKm = course.xs[course.xs.length - 1];
-  let sum = 0;
-  let count = 0;
+  const pairs = [];
   for (let i = 0; i < rider.distance.length; i += ELEVATION_SAMPLE_STRIDE) {
     const km = rider.distance[i] - shift;
-    if (km < course.xs[0] || km > lastKm) continue;
-    const diff = rider.elevation[i] - courseElevationAt(course, km);
-    sum += diff * diff;
-    count++;
+    if (km >= course.xs[0] && km <= lastKm) pairs.push([rider.elevation[i], courseElevationAt(course, km)]);
   }
-  return count > 0 ? sum / count : Infinity;
+  if (pairs.length < MIN_ELEVATION_PAIRS) return -1;
+  const meanA = pairs.reduce((sum, [a]) => sum + a, 0) / pairs.length;
+  const meanB = pairs.reduce((sum, [, b]) => sum + b, 0) / pairs.length;
+  let ab = 0;
+  let aa = 0;
+  let bb = 0;
+  pairs.forEach(([a, b]) => {
+    ab += (a - meanA) * (b - meanB);
+    aa += (a - meanA) ** 2;
+    bb += (b - meanB) ** 2;
+  });
+  return aa > 0 && bb > 0 ? ab / Math.sqrt(aa * bb) : -1;
 }
 
-function bestShiftFor(rider, course) {
-  let best = { shift: 0, error: Infinity };
-  for (let shift = -DISTANCE_SHIFT_MAX_KM; shift <= DISTANCE_SHIFT_MAX_KM; shift += DISTANCE_SHIFT_STEP_KM) {
-    const error = elevationError(rider, course, shift);
-    if (error < best.error) best = { shift, error };
-  }
-  return best.shift;
+function bestShiftFor(rider, course, maxShift) {
+  const search = (from, to, step) => {
+    let best = { shift: from, score: -Infinity };
+    for (let shift = from; shift <= to + 1e-9; shift += step) {
+      const score = elevationCorrelation(rider, course, shift);
+      if (score > best.score) best = { shift, score };
+    }
+    return best;
+  };
+  const coarse = search(-DISTANCE_SHIFT_COARSE_KM, maxShift, DISTANCE_SHIFT_COARSE_KM);
+  return search(coarse.shift - DISTANCE_SHIFT_COARSE_KM, coarse.shift + DISTANCE_SHIFT_COARSE_KM, DISTANCE_SHIFT_FINE_KM);
 }
 
-function estimateDistanceShift(riders, course) {
+function estimateDistanceShift(riders, course, maxShift = DISTANCE_SHIFT_DEFAULT_MAX_KM) {
   const usable = riders.filter(rider => rider.elevation?.length > 0 && rider.elevation.length === rider.distance?.length);
   if (!(course?.xs?.length > 1) || usable.length === 0) return null;
-  return median(usable.slice(0, MAX_ELEVATION_RIDERS).map(rider => bestShiftFor(rider, course)));
+  const fits = usable.slice(0, MAX_ELEVATION_RIDERS).map(rider => bestShiftFor(rider, course, maxShift));
+  if (median(fits.map(fit => fit.score)) < MIN_ELEVATION_CORRELATION) return null;
+  return median(fits.map(fit => fit.shift));
 }
 
 function calibrateRace(riders, course, sampleInterval = 1) {
@@ -615,22 +657,35 @@ function calibrateRace(riders, course, sampleInterval = 1) {
   const timed = timedRiders(riders);
   const finishRawKm = timed.length > 0 ? median(timed.map(rider => distanceAtTime(rider, rider.finishTime - offset, sampleInterval))) : null;
   const courseKm = course?.lengthKm ?? null;
-  const shift = estimateDistanceShift(riders, course) ?? (finishRawKm !== null && courseKm !== null ? finishRawKm - courseKm : 0);
+  const anchorShift = finishRawKm !== null && courseKm !== null ? finishRawKm - courseKm : 0;
+  const maxShift = Math.max(DISTANCE_SHIFT_DEFAULT_MAX_KM, anchorShift + 1);
+  const shift = estimateDistanceShift(riders, course, maxShift) ?? anchorShift;
   const finishKm = finishRawKm !== null ? finishRawKm - shift : courseKm;
-  return { offset, shift, finishKm };
+  return { offset, shift, finishKm, finishRawKm };
 }
 
-function normalizeRiders(riders, { offset = 0, shift = 0, finishKm = null } = {}) {
-  return riders.map(rider => {
-    const timed = rider.finishTime > 0;
-    return {
-      ...rider,
-      distance: (rider.distance || []).map(km => km - shift),
-      officialTime: timed ? rider.finishTime : undefined,
-      finishTime: timed ? rider.finishTime - offset : undefined,
-      finishDistance: timed && finishKm !== null ? finishKm : undefined,
-    };
-  });
+function padSeries(series, count, fill) {
+  return series ? new Array(count).fill(fill).concat(series) : series;
+}
+
+function normalizeRider(rider, { offset = 0, shift = 0, finishKm = null, finishRawKm = null }, sampleInterval) {
+  const timed = rider.finishTime > 0;
+  const ownFinish = timed && finishRawKm !== null ? distanceAtTime(rider, rider.finishTime - offset, sampleInterval) - shift : null;
+  const scale = ownFinish > 0 && finishKm > 0 ? finishKm / ownFinish : 1;
+  const pad = Math.round(offset / sampleInterval);
+  const distance = (rider.distance || []).map(km => (km - shift) * scale);
+  return {
+    ...rider,
+    distance: padSeries(distance, pad, distance[0] ?? 0),
+    power: padSeries(rider.power, pad, 0),
+    heartRate: padSeries(rider.heartRate, pad, rider.heartRate?.[0] ?? 0),
+    elevation: padSeries(rider.elevation, pad, rider.elevation?.[0] ?? 0),
+    finishDistance: timed && finishKm !== null ? finishKm : undefined,
+  };
+}
+
+function normalizeRiders(riders, calibration = {}, sampleInterval = 1) {
+  return riders.map(rider => normalizeRider(rider, calibration, sampleInterval));
 }
 
 function riderStandingAt(rider, time, sampleInterval) {
