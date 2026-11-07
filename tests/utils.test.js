@@ -209,9 +209,6 @@ describe('detectGroups', () => {
   });
 
   test('separates riders into groups based on gap', () => {
-    // Need much bigger gap to exceed GROUP_GAP_THRESHOLD_SECONDS (5s)
-    // At MIN_SPEED_KMH (10 km/h), 5s gap = ~0.014 km
-    // So gaps need to be larger than that
     const standings = [
       { position: 1, currentDistance: 10.0, currentPower: 300, distance: [] },
       { position: 2, currentDistance: 9.99, currentPower: 280, distance: [] },
@@ -240,15 +237,15 @@ describe('detectGroups', () => {
       { position: 1, currentDistance: 10.0, currentPower: 300 },
       { position: 2, currentDistance: 10.0 - km, currentPower: 280 },
     ];
-    const sevenSeconds = (7 / 3600) * DEFAULT_SPEED_KMH;
-    const nineSeconds = (9 / 3600) * DEFAULT_SPEED_KMH;
+    const fourSeconds = (4 / 3600) * DEFAULT_SPEED_KMH;
+    const sixSeconds = (6 / 3600) * DEFAULT_SPEED_KMH;
     const together = trackGroups(standingsAt(0.01), 60, 1);
     expect(together.groups.length).toBe(1);
-    expect(trackGroups(standingsAt(sevenSeconds), 60, 1, { linked: together.linked }).groups.length).toBe(1);
-    expect(trackGroups(standingsAt(sevenSeconds), 60, 1).groups.length).toBe(2);
-    const apart = trackGroups(standingsAt(nineSeconds), 60, 1, { linked: together.linked });
+    expect(trackGroups(standingsAt(fourSeconds), 60, 1, { linked: together.linked }).groups.length).toBe(1);
+    expect(trackGroups(standingsAt(fourSeconds), 60, 1).groups.length).toBe(2);
+    const apart = trackGroups(standingsAt(sixSeconds), 60, 1, { linked: together.linked });
     expect(apart.groups.length).toBe(2);
-    expect(trackGroups(standingsAt(sevenSeconds), 60, 1, { linked: apart.linked }).groups.length).toBe(2);
+    expect(trackGroups(standingsAt(fourSeconds), 60, 1, { linked: apart.linked }).groups.length).toBe(2);
   });
 
   test('marks group containing watched rider', () => {
