@@ -331,12 +331,13 @@
 }
 
 .zp-replay-panel-watch {
-  flex: 0 1 auto;
-  max-width: 420px;
+  flex: 0 0 360px;
+  max-width: 100%;
 }
 
 .zp-replay-panel-groups {
   flex: 1 1 320px;
+  min-width: 0;
 }
 
 .zp-replay-bar .zp-replay-caption {
@@ -349,8 +350,8 @@
 }
 
 .zp-replay-bar .zp-replay-watch-select {
-  width: auto;
-  max-width: 100%;
+  width: calc(100% + 4px);
+  max-width: none;
   min-width: 0;
   height: auto;
   margin: 0 0 0 -4px;
@@ -373,8 +374,9 @@
 .zp-replay-stats {
   display: flex;
   flex-wrap: wrap;
+  align-content: flex-start;
   column-gap: 6px;
-  min-height: 18px;
+  min-height: 36px;
   font-variant-numeric: tabular-nums;
 }
 
