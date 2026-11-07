@@ -10,6 +10,7 @@ const {
   calcSpeed,
   calcTimeGapFromDistance,
   detectGroups,
+  trackGroups,
   selectRidersToSync,
   clamp,
   escapeHtml,
@@ -208,18 +209,43 @@ describe('detectGroups', () => {
   });
 
   test('separates riders into groups based on gap', () => {
-    // Need much bigger gap to exceed GROUP_GAP_THRESHOLD_SECONDS (5s)
-    // At MIN_SPEED_KMH (10 km/h), 5s gap = ~0.014 km
-    // So gaps need to be larger than that
     const standings = [
       { position: 1, currentDistance: 10.0, currentPower: 300, distance: [] },
-      { position: 2, currentDistance: 9.99, currentPower: 280, distance: [] },
-      { position: 3, currentDistance: 9.5, currentPower: 270, distance: [] }, // ~180s gap at 10 km/h
+      { position: 2, currentDistance: 9.995, currentPower: 280, distance: [] },
+      { position: 3, currentDistance: 9.5, currentPower: 270, distance: [] },
     ];
     const groups = detectGroups(standings, 60, 1);
     expect(groups.length).toBe(2);
     expect(groups[0].riders.length).toBe(2);
     expect(groups[1].riders.length).toBe(1);
+  });
+
+  test('splits a long line of riders even when each gap is small', () => {
+    const standings = Array.from({ length: 12 }, (_, i) => ({
+      position: i + 1,
+      currentDistance: 10 - i * 0.03,
+      currentPower: 300,
+    }));
+    const groups = detectGroups(standings, 60, 1);
+    expect(groups.length).toBe(2);
+    expect(groups[0].riders.length).toBe(8);
+    expect(groups[1].riders.length).toBe(4);
+  });
+
+  test('keeps a rider in the group until the gap clearly opens', () => {
+    const standingsAt = km => [
+      { position: 1, currentDistance: 10.0, currentPower: 300 },
+      { position: 2, currentDistance: 10.0 - km, currentPower: 280 },
+    ];
+    const fourSeconds = (4 / 3600) * DEFAULT_SPEED_KMH;
+    const sixSeconds = (6 / 3600) * DEFAULT_SPEED_KMH;
+    const together = trackGroups(standingsAt(0.01), 60, 1);
+    expect(together.groups.length).toBe(1);
+    expect(trackGroups(standingsAt(fourSeconds), 60, 1, { linked: together.linked }).groups.length).toBe(1);
+    expect(trackGroups(standingsAt(fourSeconds), 60, 1).groups.length).toBe(2);
+    const apart = trackGroups(standingsAt(sixSeconds), 60, 1, { linked: together.linked });
+    expect(apart.groups.length).toBe(2);
+    expect(trackGroups(standingsAt(fourSeconds), 60, 1, { linked: apart.linked }).groups.length).toBe(2);
   });
 
   test('marks group containing watched rider', () => {
