@@ -30,7 +30,8 @@ const INLINE_BAR_TEMPLATE = `
   <div class="zp-replay-bar-row">
     <label class="zp-replay-watch">Watching <select class="zp-replay-watch-select"></select></label>
     <span class="zp-replay-stats"></span>
-  </div>`;
+  </div>
+  <div class="zp-replay-groups" aria-label="Groups"></div>`;
 
 const inlineReplay = {
   raceKey: null,
@@ -42,6 +43,7 @@ const inlineReplay = {
   speed: INLINE_DEFAULT_SPEED,
   frameId: null,
   hoveredId: null,
+  hoveredGroup: null,
   view: null,
 };
 
@@ -55,6 +57,15 @@ function dotIdFrom(target) {
 
 function hoverInlineDot(zwiftId) {
   inlineReplay.hoveredId = zwiftId;
+  renderInlineFrame();
+}
+
+function groupChipFrom(target) {
+  return target?.closest?.('.zp-replay-group[data-group]') ?? null;
+}
+
+function hoverGroupChip(chip) {
+  inlineReplay.hoveredGroup = chip ? Number(chip.dataset.group) : null;
   renderInlineFrame();
 }
 
@@ -96,13 +107,20 @@ function createInlineBar() {
     speeds: [...element.querySelectorAll('[data-speed]')],
     select: part('.zp-replay-watch-select'),
     stats: part('.zp-replay-stats'),
+    groups: part('.zp-replay-groups'),
+    groupsMarkup: '',
   };
   bar.play.addEventListener('click', () => setInlinePlaying(inlineReplay.frameId === null));
   bar.scrubber.addEventListener('input', () => seekInline(Number(bar.scrubber.value)));
   bar.select.addEventListener('change', () => selectWatchedRider(bar.select.value));
   element.addEventListener('click', event => {
     const speed = event.target.closest('[data-speed]')?.dataset.speed;
+    const chip = groupChipFrom(event.target);
     if (speed) setInlineSpeed(Number(speed));
+    else if (chip) selectWatchedRider(chip.dataset.zwiftId);
+  });
+  INLINE_HOVER_EVENTS.forEach(([type, key]) => {
+    bar.groups.addEventListener(type, event => hoverGroupChip(groupChipFrom(event[key])));
   });
   element.addEventListener('keydown', handleInlineKeydown);
   return bar;
@@ -189,13 +207,15 @@ function inlineSnapshot() {
   const standings = computeRaceStandings(riders, time, sampleInterval);
   const groups = detectGroups(standings, time, watched?.position, sampleInterval);
   const yourGroupIndex = groups.findIndex(group => group.hasYou);
+  const idsOf = group => new Set(group?.riders.map(standing => standing.rider.zwiftId));
   return {
     time,
     standings,
     groups,
     yourGroupIndex,
     youIndex: standings.findIndex(standing => standing.rider === watched),
-    groupIds: new Set(groups[yourGroupIndex]?.riders.map(standing => standing.rider.zwiftId)),
+    groupIds: idsOf(groups[yourGroupIndex]),
+    hotIds: idsOf(groups[inlineReplay.hoveredGroup]),
   };
 }
 
@@ -224,6 +244,7 @@ function renderInlineDots(view, snapshot) {
       return;
     }
     dot.className = `zp-replay-dot zp-replay-dot-${dotRole(index, zwiftId, snapshot)}`;
+    dot.classList.toggle('zp-replay-dot-hot', snapshot.hotIds.has(zwiftId));
     dot.style.transform = `translate(${x}px, ${y}px)`;
   });
   Object.entries(hidden).forEach(([side, count]) => {
@@ -267,15 +288,28 @@ function renderInlineTooltip(view, snapshot) {
 function watchedStatsText({ standings, groups, youIndex, yourGroupIndex, time }) {
   if (youIndex < 0) return '';
   const { sampleInterval } = inlineReplay;
-  const [leader] = standings;
   const you = standings[youIndex];
   return buildRiderStatsText({
     rank: youIndex + 1,
     power: you.currentPower,
-    leaderPower: leader.currentPower,
-    gapToLeader: calcStandingGap(leader, you, time, sampleInterval),
+    gapToLeader: calcStandingGap(standings[0], you, time, sampleInterval),
     gapToGroup: calcGapToGroupAhead(groups, yourGroupIndex, you, time, sampleInterval),
+    ...nearestRiderGaps(standings, youIndex, time, sampleInterval),
   });
+}
+
+function groupChipMarkup(item) {
+  const gap = item.gap > 0 ? `<span class="zp-replay-gap">${formatGapDuration(item.gap)}</span>` : '';
+  if (item.type === 'fold') return `${gap}<span class="zp-replay-group zp-replay-group-fold">${escapeHtml(item.label)}</span>`;
+  const role = item.isYou ? 'you' : item.index === 0 ? 'lead' : 'other';
+  return `${gap}<button type="button" class="zp-replay-group zp-replay-group-${role}" data-group="${item.index}" data-zwift-id="${escapeHtml(item.zwiftId)}">${escapeHtml(item.label)}</button>`;
+}
+
+function renderGroupStrip({ bar }, { groups, yourGroupIndex, time }) {
+  const markup = buildGroupStrip(groups, yourGroupIndex, time, inlineReplay.sampleInterval).map(groupChipMarkup).join('');
+  if (markup === bar.groupsMarkup) return;
+  bar.groupsMarkup = markup;
+  bar.groups.innerHTML = markup;
 }
 
 function renderInlineFrame() {
@@ -284,6 +318,7 @@ function renderInlineFrame() {
   const snapshot = inlineSnapshot();
   renderInlineDots(view, snapshot);
   renderInlineTooltip(view, snapshot);
+  renderGroupStrip(view, snapshot);
   view.bar.stats.textContent = watchedStatsText(snapshot);
   view.bar.time.textContent = `${formatTime(time)} / ${formatTime(maxTime)}`;
   view.bar.scrubber.value = String(Math.floor(time));
@@ -355,6 +390,7 @@ function setInlineRace(raceKey, race) {
     maxTime,
     selectedId: isNewRace ? null : inlineReplay.selectedId,
     hoveredId: isNewRace ? null : inlineReplay.hoveredId,
+    hoveredGroup: isNewRace ? null : inlineReplay.hoveredGroup,
     time: isNewRace ? 0 : Math.min(inlineReplay.time, maxTime),
   });
   renderInlineReplay();

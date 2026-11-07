@@ -338,3 +338,78 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+.zp-replay-layer .zp-replay-dot-hot {
+  z-index: 5;
+  border-color: #1f2328;
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.35);
+}
+
+.zp-replay-groups {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.zp-replay-groups:empty {
+  display: none;
+}
+
+.zp-replay-bar .zp-replay-group {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 2px 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 12px;
+  background: #fff;
+  color: #1f2328;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.zp-replay-bar button.zp-replay-group {
+  cursor: pointer;
+}
+
+.zp-replay-bar button.zp-replay-group:hover,
+.zp-replay-bar button.zp-replay-group:focus-visible {
+  border-color: #1f2328;
+  outline: none;
+}
+
+.zp-replay-bar .zp-replay-group-lead {
+  border-color: #d4a72c;
+  background: #fff8c5;
+}
+
+.zp-replay-bar .zp-replay-group-you {
+  border-color: #1f6feb;
+  background: #ddf4ff;
+  font-weight: 600;
+}
+
+.zp-replay-bar .zp-replay-group-fold {
+  border-style: dashed;
+  color: #57606a;
+}
+
+.zp-replay-gap {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  color: #57606a;
+  font-size: 11px;
+}
+
+.zp-replay-gap::before,
+.zp-replay-gap::after {
+  content: "";
+  width: 10px;
+  border-top: 1px solid #afb8c1;
+}

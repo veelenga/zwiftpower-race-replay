@@ -36,6 +36,8 @@ const {
   buildWatchOptions,
   shortRiderName,
   buildRiderStatsText,
+  nearestRiderGaps,
+  buildGroupStrip,
   DEFAULT_SPEED_KMH,
   SEEK_STEP_SECONDS,
   SEEK_SHIFT_STEP_SECONDS,
@@ -1061,14 +1063,71 @@ describe('buildRiderStatsText', () => {
   const martin = { name: 'Martin' };
 
   test.each([
-    [{ rank: 12, power: 287, leaderPower: 310, gapToLeader: 14, gapToGroup: 3 }, '#12 · 287 W · leader 310 W · +14s to leader · +3s to group'],
+    [{ rank: 12, power: 287, gapToLeader: 14, gapToGroup: 3 }, '#12 · 287 W · +14s to leader · +3s to group'],
     [{ rank: 20, power: 250, gapToLeader: 75 }, '#20 · 250 W · +1:15 to leader'],
-    [{ rank: 1, power: 310, leaderPower: 310, gapToLeader: 0, gapToGroup: 0 }, '#1 · 310 W · leader 310 W'],
+    [{ rank: 1, power: 310, gapToLeader: 0, gapToGroup: 0, behind: { name: 'Lee', seconds: 2 } }, '#1 · 310 W · 2s ahead of Lee'],
+    [{ rank: 2, power: 300, gapToLeader: 4, ahead: { name: 'Smith', seconds: 4 }, behind: { name: 'Lee', seconds: 0 } }, '#2 · 300 W · +4s to leader · 4s behind Smith'],
     [{ rank: 5, power: 280, gapToLeader: 14, watchedGap: { ...martin, seconds: 3, ahead: true } }, '#5 · 280 W · +14s to leader · 3s ahead of Martin'],
     [{ rank: 9, power: 0, watchedGap: { ...martin, seconds: 65, ahead: false } }, '#9 · 0 W · 1:05 behind Martin'],
     [{ rank: 5, power: 280, watchedGap: { ...martin, seconds: 0, ahead: true } }, '#5 · 280 W'],
     [{}, ''],
   ])('builds %j', (stats, expected) => {
     expect(buildRiderStatsText(stats)).toBe(expected);
+  });
+});
+
+describe('nearestRiderGaps', () => {
+  const standing = (name, km) => ({ rider: { name, zwiftId: name }, finished: false, currentDistance: km });
+  const standings = [standing('Ann Lead', 10.2), standing('Bob You', 10.1), standing('Cid Back', 10)];
+  const nineSeconds = Math.round((0.1 / DEFAULT_SPEED_KMH) * 3600);
+
+  test('names the riders right in front of and behind the watched rider', () => {
+    expect(nearestRiderGaps(standings, 1, 60)).toEqual({
+      ahead: { name: 'Ann', seconds: nineSeconds },
+      behind: { name: 'Cid', seconds: nineSeconds },
+    });
+  });
+
+  test('leaves out the side that has nobody', () => {
+    expect(nearestRiderGaps(standings, 0, 60).ahead).toBeUndefined();
+    expect(nearestRiderGaps(standings, 2, 60).behind).toBeUndefined();
+    expect(nearestRiderGaps(standings, -1, 60)).toEqual({});
+  });
+});
+
+describe('buildGroupStrip', () => {
+  const standing = (name, km) => ({ rider: { name, zwiftId: name.toLowerCase() }, finished: false, currentDistance: km });
+  const group = (idx, avgPower, ...riders) => ({ idx, name: idx === 0 ? 'Lead group' : `Group ${idx + 1}`, avgPower, riders });
+  const groups = [
+    group(0, 372, standing('Ann', 20), standing('Bea', 19.99)),
+    group(1, 340, standing('Cid', 19.5)),
+    group(2, 368, standing('Dan', 19), standing('Eve', 18.99), standing('Fay', 18.98)),
+    group(3, 300, standing('Gus', 18.5)),
+    group(4, 290, standing('Hal', 18)),
+    group(5, 280, standing('Ivy', 17.5)),
+  ];
+  const gap = km => Math.round((km / DEFAULT_SPEED_KMH) * 3600);
+
+  test('shows the lead group, the groups around you and folds the rest', () => {
+    expect(buildGroupStrip(groups, 2, 60)).toEqual([
+      { type: 'group', index: 0, gap: 0, isYou: false, label: 'Lead group · 2 riders · 372 W', zwiftId: 'ann' },
+      { type: 'group', index: 1, gap: gap(0.49), isYou: false, label: 'Cid · 340 W', zwiftId: 'cid' },
+      { type: 'group', index: 2, gap: gap(0.5), isYou: true, label: 'Group 3 · 3 riders (you) · 368 W', zwiftId: 'dan' },
+      { type: 'group', index: 3, gap: gap(0.48), isYou: false, label: 'Gus · 300 W', zwiftId: 'gus' },
+      { type: 'fold', label: '+2 solo', gap: gap(0.5) },
+    ]);
+  });
+
+  test('folds groups between the lead group and yours', () => {
+    const items = buildGroupStrip(groups, 5, 60);
+    expect(items.map(item => item.label)).toEqual([
+      'Lead group · 2 riders · 372 W', '+3 groups · 5 riders', 'Hal · 290 W', 'Ivy (you) · 280 W',
+    ]);
+    expect(items[1].gap).toBe(gap(0.49));
+  });
+
+  test('shows the first four groups when nobody is watched', () => {
+    expect(buildGroupStrip(groups, -1, 60).map(item => item.type)).toEqual(['group', 'group', 'group', 'group', 'fold']);
+    expect(buildGroupStrip([], -1, 60)).toEqual([]);
   });
 });
