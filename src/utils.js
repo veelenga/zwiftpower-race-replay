@@ -5,31 +5,8 @@
 
 // Constants
 const SECONDS_PER_MINUTE = 60;
-const SECONDS_PER_HOUR = 3600;
 const MS_PER_SECOND = 1000;
-const DEFAULT_SPEED_KMH = 40;
-const MIN_SPEED_KMH = 10;
-const CLOCK_OFFSET_MAX_SECONDS = 180;
-const CLOCK_OFFSET_STEP_SECONDS = 0.5;
-const STOP_SEARCH_FRACTION = 0.8;
-const STOP_PEDALLING_WATTS = 50;
-const STOP_QUIET_WATTS = 30;
-const STOP_QUIET_SAMPLES = 5;
-const DISTANCE_SHIFT_DEFAULT_MAX_KM = 1;
-const DISTANCE_SHIFT_COARSE_KM = 0.05;
-const DISTANCE_SHIFT_FINE_KM = 0.01;
-const ELEVATION_SAMPLE_STRIDE = 5;
-const MIN_ELEVATION_PAIRS = 50;
-const MIN_ELEVATION_CORRELATION = 0.9;
-const FINISH_SNAP_KM = 0.15;
-const MAX_ELEVATION_RIDERS = 5;
-const MIN_CALIBRATION_RIDERS = 3;
-const GROUP_GAP_THRESHOLD_SECONDS = 3;
-const GROUP_GAP_RELEASE_SECONDS = 5;
-const GROUP_MAX_SPAN_SECONDS = 20;
-const GROUP_MAX_SPAN_RELEASE_SECONDS = 25;
 const MAX_POSITION = 200;
-const SPEED_WINDOW_SAMPLES = 5;
 
 /**
  * Format seconds into mm:ss string
@@ -79,16 +56,6 @@ function formatRelativeTime(isoString) {
 }
 
 /**
- * Convert real time (seconds) to data array index
- * @param {number} time - Time in seconds
- * @param {number} sampleInterval - Sample interval (default 1)
- * @returns {number} Array index
- */
-function timeToIndex(time, sampleInterval = 1) {
-  return Math.floor(time / sampleInterval);
-}
-
-/**
  * Extract Zwift ID from a profile URL
  * Supports multiple URL formats used by ZwiftPower
  * @param {string} href - Profile URL
@@ -110,142 +77,6 @@ function extractZwiftId(href) {
   if (match) return match[1];
 
   return null;
-}
-
-/**
- * Calculate speed in km/h from distance data
- * @param {Object} rider - Rider object with distance array
- * @param {number} time - Current time in seconds
- * @param {number} sampleInterval - Sample interval (default 1)
- * @returns {number} Speed in km/h
- */
-function calcSpeed(rider, time, sampleInterval = 1) {
-  const MIN_TIME_FOR_SPEED = 3;
-  if (!rider.distance || time < MIN_TIME_FOR_SPEED) return DEFAULT_SPEED_KMH;
-
-  const idx = Math.min(timeToIndex(time, sampleInterval), rider.distance.length - 1);
-  const window = Math.min(SPEED_WINDOW_SAMPLES, Math.max(idx, 1));
-  const prevIdx = Math.max(0, idx - window);
-  const d1 = rider.distance[prevIdx] || 0;
-  const d2 = rider.distance[idx] || d1;
-  const speedKmPerSec = (d2 - d1) / ((idx - prevIdx || 1) * sampleInterval);
-  const speedKmh = speedKmPerSec * SECONDS_PER_HOUR;
-
-  return Math.max(speedKmh, MIN_SPEED_KMH);
-}
-
-function secondsUntilReached(rider, km, time, sampleInterval = 1) {
-  const samples = rider.distance;
-  if (!samples?.length || samples[samples.length - 1] < km) return null;
-  let low = Math.min(timeToIndex(time, sampleInterval), samples.length - 1);
-  if (samples[low] >= km) return 0;
-  let high = samples.length - 1;
-  while (low < high) {
-    const mid = (low + high) >> 1;
-    if (samples[mid] >= km) high = mid;
-    else low = mid + 1;
-  }
-  const before = samples[low - 1];
-  const fraction = samples[low] > before ? (km - before) / (samples[low] - before) : 1;
-  return Math.max(0, (low - 1 + fraction) * sampleInterval - time);
-}
-
-/**
- * Calculate time gap from distance in km
- * @param {number} distanceKm - Distance gap in km
- * @param {Object} trailingRider - Rider behind (for speed calc)
- * @param {number} time - Current time
- * @param {number} sampleInterval - Sample interval
- * @returns {number} Time gap in seconds
- */
-function calcTimeGapFromDistance(distanceKm, trailingRider, time, sampleInterval = 1) {
-  const speedKmh = calcSpeed(trailingRider, time, sampleInterval);
-  const timeHours = distanceKm / speedKmh;
-  return Math.round(timeHours * SECONDS_PER_HOUR);
-}
-
-/**
- * Calculate time gap between two riders
- * @param {Object} riderA - Lead rider
- * @param {Object} riderB - Trailing rider
- * @param {number} time - Current time
- * @param {number} sampleInterval - Sample interval
- * @returns {number} Time gap in seconds
- */
-function calcTimeGap(riderA, riderB, time, sampleInterval = 1) {
-  if (time === 0) return 0;
-  const distA = riderA.currentDistance ?? riderA.distance?.[timeToIndex(time, sampleInterval)] ?? 0;
-  const distB = riderB.currentDistance ?? riderB.distance?.[timeToIndex(time, sampleInterval)] ?? 0;
-  if (distA <= distB) return 0;
-  const reached = secondsUntilReached(riderB, distA, time, sampleInterval);
-  if (reached !== null) return Math.round(reached);
-  return calcTimeGapFromDistance(distA - distB, riderB, time, sampleInterval);
-}
-
-/**
- * Detect groups of riders based on time gaps
- * @param {Array} standings - Sorted array of riders by distance (descending)
- * @param {number} time - Current time
- * @param {number} watchingPosition - Position of the rider being watched
- * @param {number} sampleInterval - Sample interval
- * @returns {Array} Array of group objects
- */
-function standingId(standing) {
-  return standing.rider?.zwiftId ?? standing.position;
-}
-
-function trackGroups(standings, time, watchingPosition, { sampleInterval = 1, linked = new Set() } = {}) {
-  const nextLinked = new Set();
-  if (standings.length === 0) return { groups: [], linked: nextLinked };
-
-  const groups = [];
-  let currentGroup = [standings[0]];
-
-  for (let i = 1; i < standings.length; i++) {
-    const prevRider = standings[i - 1];
-    const rider = standings[i];
-    const pair = `${standingId(prevRider)}|${standingId(rider)}`;
-    const wasLinked = linked.has(pair);
-    const timeGap = calcStandingGap(prevRider, rider, time, sampleInterval);
-    const span = calcStandingGap(currentGroup[0], rider, time, sampleInterval);
-    const maxGap = wasLinked ? GROUP_GAP_RELEASE_SECONDS : GROUP_GAP_THRESHOLD_SECONDS;
-    const maxSpan = wasLinked ? GROUP_MAX_SPAN_RELEASE_SECONDS : GROUP_MAX_SPAN_SECONDS;
-
-    if (timeGap <= maxGap && span <= maxSpan) {
-      currentGroup.push(rider);
-      nextLinked.add(pair);
-    } else {
-      groups.push(currentGroup);
-      currentGroup = [rider];
-    }
-  }
-
-  groups.push(currentGroup);
-
-  return { groups: describeGroups(groups, standings[0], time, watchingPosition, sampleInterval), linked: nextLinked };
-}
-
-function detectGroups(standings, time, watchingPosition, sampleInterval = 1) {
-  return trackGroups(standings, time, watchingPosition, { sampleInterval }).groups;
-}
-
-function describeGroups(groups, leader, time, watchingPosition, sampleInterval) {
-  return groups.map((groupRiders, idx) => {
-    const avgPower = Math.round(
-      groupRiders.reduce((sum, r) => sum + r.currentPower, 0) / groupRiders.length
-    );
-    const timeGapToLeader = idx === 0 ? 0 : calcTimeGap(leader, groupRiders[0], time, sampleInterval);
-    const hasYou = groupRiders.some(r => r.position === watchingPosition);
-
-    return {
-      idx,
-      riders: groupRiders,
-      avgPower,
-      timeGapToLeader,
-      hasYou,
-      name: idx === 0 ? 'Lead group' : `Group ${idx + 1}`,
-    };
-  });
 }
 
 /**
@@ -546,208 +377,6 @@ function resolveShortcut({ key, shiftKey = false, ctrlKey = false, metaKey = fal
   return action;
 }
 
-function seriesEndTime(rider, sampleInterval = 1) {
-  return Math.max((rider.distance?.length || 0) - 1, 0) * sampleInterval;
-}
-
-function riderFinishTime(rider, sampleInterval = 1) {
-  return rider.finishTime > 0 ? rider.finishTime : seriesEndTime(rider, sampleInterval);
-}
-
-function raceDuration(riders, sampleInterval = 1) {
-  return Math.max(0, ...riders.map(rider => Math.max(riderFinishTime(rider, sampleInterval), seriesEndTime(rider, sampleInterval))));
-}
-
-function distanceAtTime(rider, time, sampleInterval = 1) {
-  const samples = rider.distance || [];
-  const lastIndex = samples.length - 1;
-  const position = time / sampleInterval;
-  const index = Math.floor(position);
-  if (index < lastIndex) {
-    const base = samples[index] || 0;
-    return base + ((samples[index + 1] || base) - base) * (position - index);
-  }
-  const speedKmPerSecond = calcSpeed(rider, lastIndex * sampleInterval, sampleInterval) / SECONDS_PER_HOUR;
-  return (samples[lastIndex] || 0) + speedKmPerSecond * (time - lastIndex * sampleInterval);
-}
-
-function median(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
-function timedRiders(riders) {
-  return riders.filter(rider => rider.finishTime > 0 && rider.distance?.length > 1);
-}
-
-function pedalStopIndex(power = []) {
-  for (let i = power.length - 1; i > power.length * STOP_SEARCH_FRACTION; i--) {
-    if (power[i] <= STOP_PEDALLING_WATTS) continue;
-    const after = power.slice(i + 1, i + 1 + STOP_QUIET_SAMPLES);
-    return after.length === STOP_QUIET_SAMPLES && after.every(watts => watts < STOP_QUIET_WATTS) ? i + 1 : -1;
-  }
-  return -1;
-}
-
-function offsetFromPedalStops(riders, sampleInterval) {
-  const offsets = riders
-    .map(rider => ({ rider, stop: pedalStopIndex(rider.power) }))
-    .filter(({ stop }) => stop > 0)
-    .map(({ rider, stop }) => rider.finishTime - stop * sampleInterval)
-    .filter(offset => offset >= 0 && offset <= CLOCK_OFFSET_MAX_SECONDS);
-  return offsets.length >= MIN_CALIBRATION_RIDERS ? median(offsets) : null;
-}
-
-function finishSpread(riders, offset, sampleInterval) {
-  const kms = riders.map(rider => distanceAtTime(rider, rider.finishTime - offset, sampleInterval));
-  const mid = median(kms);
-  return median(kms.map(km => Math.abs(km - mid)));
-}
-
-function offsetFromFinishSpread(riders, sampleInterval) {
-  let best = { offset: 0, spread: Infinity };
-  for (let offset = 0; offset <= CLOCK_OFFSET_MAX_SECONDS; offset += CLOCK_OFFSET_STEP_SECONDS) {
-    const spread = finishSpread(riders, offset, sampleInterval);
-    if (spread < best.spread) best = { offset, spread };
-  }
-  return best.offset;
-}
-
-function estimateClockOffset(riders, sampleInterval = 1) {
-  const timed = timedRiders(riders);
-  if (timed.length < MIN_CALIBRATION_RIDERS) return 0;
-  return offsetFromPedalStops(timed, sampleInterval) ?? offsetFromFinishSpread(timed, sampleInterval);
-}
-
-function courseElevationAt({ xs, ys }, km) {
-  let low = 0;
-  let high = xs.length - 1;
-  while (low < high) {
-    const mid = (low + high) >> 1;
-    if (xs[mid] < km) low = mid + 1;
-    else high = mid;
-  }
-  return ys[low];
-}
-
-function elevationCorrelation(rider, course, shift) {
-  const lastKm = course.xs[course.xs.length - 1];
-  const pairs = [];
-  for (let i = 0; i < rider.distance.length; i += ELEVATION_SAMPLE_STRIDE) {
-    const km = rider.distance[i] - shift;
-    if (km >= course.xs[0] && km <= lastKm) pairs.push([rider.elevation[i], courseElevationAt(course, km)]);
-  }
-  if (pairs.length < MIN_ELEVATION_PAIRS) return -1;
-  const meanA = pairs.reduce((sum, [a]) => sum + a, 0) / pairs.length;
-  const meanB = pairs.reduce((sum, [, b]) => sum + b, 0) / pairs.length;
-  let ab = 0;
-  let aa = 0;
-  let bb = 0;
-  pairs.forEach(([a, b]) => {
-    ab += (a - meanA) * (b - meanB);
-    aa += (a - meanA) ** 2;
-    bb += (b - meanB) ** 2;
-  });
-  return aa > 0 && bb > 0 ? ab / Math.sqrt(aa * bb) : -1;
-}
-
-function bestShiftFor(rider, course, maxShift) {
-  const search = (from, to, step) => {
-    let best = { shift: from, score: -Infinity };
-    for (let shift = from; shift <= to + 1e-9; shift += step) {
-      const score = elevationCorrelation(rider, course, shift);
-      if (score > best.score) best = { shift, score };
-    }
-    return best;
-  };
-  const coarse = search(-DISTANCE_SHIFT_COARSE_KM, maxShift, DISTANCE_SHIFT_COARSE_KM);
-  return search(coarse.shift - DISTANCE_SHIFT_COARSE_KM, coarse.shift + DISTANCE_SHIFT_COARSE_KM, DISTANCE_SHIFT_FINE_KM);
-}
-
-function estimateDistanceShift(riders, course, maxShift = DISTANCE_SHIFT_DEFAULT_MAX_KM) {
-  const usable = riders.filter(rider => rider.elevation?.length > 0 && rider.elevation.length === rider.distance?.length);
-  if (!(course?.xs?.length > 1) || usable.length === 0) return null;
-  const fits = usable.slice(0, MAX_ELEVATION_RIDERS).map(rider => bestShiftFor(rider, course, maxShift));
-  if (median(fits.map(fit => fit.score)) < MIN_ELEVATION_CORRELATION) return null;
-  return median(fits.map(fit => fit.shift));
-}
-
-function calibrateRace(riders, course, sampleInterval = 1) {
-  const offset = estimateClockOffset(riders, sampleInterval);
-  const timed = timedRiders(riders);
-  const finishRawKm = timed.length > 0 ? median(timed.map(rider => distanceAtTime(rider, rider.finishTime - offset, sampleInterval))) : null;
-  const courseKm = course?.lengthKm ?? null;
-  const anchorShift = finishRawKm !== null && courseKm !== null ? finishRawKm - courseKm : 0;
-  const fitted = estimateDistanceShift(riders, course, Math.max(DISTANCE_SHIFT_DEFAULT_MAX_KM, anchorShift + 1));
-  const nearProfileEnd = fitted !== null && courseKm !== null && Math.abs(fitted - anchorShift) <= FINISH_SNAP_KM;
-  const shift = fitted === null || nearProfileEnd ? anchorShift : fitted;
-  const finishKm = finishRawKm !== null ? finishRawKm - shift : courseKm;
-  return { offset, shift, finishKm, finishRawKm };
-}
-
-function padSeries(series, count, fill) {
-  return series ? new Array(count).fill(fill).concat(series) : series;
-}
-
-function normalizeRider(rider, { offset = 0, shift = 0, finishKm = null, finishRawKm = null }, sampleInterval) {
-  const timed = rider.finishTime > 0;
-  const ownFinish = timed && finishRawKm !== null ? distanceAtTime(rider, rider.finishTime - offset, sampleInterval) - shift : null;
-  const scale = ownFinish > 0 && finishKm > 0 ? finishKm / ownFinish : 1;
-  const pad = Math.round(offset / sampleInterval);
-  const distance = (rider.distance || []).map(km => (km - shift) * scale);
-  return {
-    ...rider,
-    distance: padSeries(distance, pad, distance[0] ?? 0),
-    power: padSeries(rider.power, pad, 0),
-    heartRate: padSeries(rider.heartRate, pad, rider.heartRate?.[0] ?? 0),
-    elevation: padSeries(rider.elevation, pad, rider.elevation?.[0] ?? 0),
-    finishDistance: timed && finishKm !== null ? finishKm : undefined,
-  };
-}
-
-function normalizeRiders(riders, calibration = {}, sampleInterval = 1) {
-  return riders.map(rider => normalizeRider(rider, calibration, sampleInterval));
-}
-
-function riderStandingAt(rider, time, sampleInterval) {
-  const samples = rider.distance || [];
-  const lastIndex = samples.length - 1;
-  const index = Math.min(timeToIndex(time, sampleInterval), lastIndex);
-  const finishTime = riderFinishTime(rider, sampleInterval);
-  const finished = time >= finishTime;
-  return {
-    rider,
-    position: rider.position,
-    distance: samples,
-    currentDistance: finished ? rider.finishDistance ?? samples[lastIndex] ?? 0 : samples[index] || 0,
-    currentPower: finished ? 0 : rider.power?.[index] || 0,
-    finished,
-    finishTime,
-  };
-}
-
-function compareStandings(a, b) {
-  if (a.finished !== b.finished) return a.finished ? -1 : 1;
-  return a.finished ? a.finishTime - b.finishTime : b.currentDistance - a.currentDistance;
-}
-
-function computeRaceStandings(riders, time, sampleInterval = 1) {
-  return riders.map(rider => riderStandingAt(rider, time, sampleInterval)).sort(compareStandings);
-}
-
-function calcStandingGap(ahead, behind, time, sampleInterval = 1) {
-  if (ahead.finished && behind.finished) return Math.round(behind.finishTime - ahead.finishTime);
-  return calcTimeGap(ahead, behind, time, sampleInterval);
-}
-
-function calcGapToGroupAhead(groups, groupIndex, watching, time, sampleInterval = 1) {
-  if (!watching || groupIndex <= 0) return 0;
-
-  const groupAhead = groups[groupIndex - 1];
-  return calcStandingGap(groupAhead.riders[groupAhead.riders.length - 1], watching, time, sampleInterval);
-}
-
 function advancePlaybackTime(time, elapsedMs, speed, maxTime) {
   return clamp(time + (elapsedMs / MS_PER_SECOND) * speed, 0, maxTime);
 }
@@ -766,10 +395,6 @@ function buildWatchOptions(riders) {
       position: rider.position,
       label: `#${rider.position} ${rider.name}${rider.isCurrentUser ? ' (you)' : ''}`,
     }));
-}
-
-function shortRiderName(name) {
-  return String(name ?? '').trim().split(/\s+/)[0];
 }
 
 function formatGapTo(seconds, target) {
@@ -802,44 +427,6 @@ function buildRiderStatsText(stats) {
   return buildRiderStatsParts(stats).join(' · ');
 }
 
-function riderGap(ahead, behind, named, time, sampleInterval) {
-  return { name: shortRiderName(named.rider.name), seconds: calcStandingGap(ahead, behind, time, sampleInterval) };
-}
-
-function nearestRiderGaps(standings, youIndex, time, sampleInterval = 1) {
-  const you = standings[youIndex];
-  if (!you) return {};
-  const ahead = standings[youIndex - 1];
-  const behind = standings[youIndex + 1];
-  return {
-    ahead: ahead && riderGap(ahead, you, ahead, time, sampleInterval),
-    behind: behind && riderGap(you, behind, behind, time, sampleInterval),
-  };
-}
-
-function groupGapAhead(groups, index, time, sampleInterval) {
-  if (index === 0) return 0;
-  const ahead = groups[index - 1].riders;
-  return calcStandingGap(ahead[ahead.length - 1], groups[index].riders[0], time, sampleInterval);
-}
-
-function stripGroupIndexes(total, yourGroupIndex) {
-  const wanted = yourGroupIndex < 0 ? [0, 1, 2, 3] : [0, yourGroupIndex - 1, yourGroupIndex, yourGroupIndex + 1];
-  return new Set(wanted.filter(index => index >= 0 && index < total));
-}
-
-function groupChipLabel(group, isYou) {
-  const [first] = group.riders;
-  const who = group.riders.length === 1 ? shortRiderName(first.rider.name) : `${group.name} · ${group.riders.length} riders`;
-  return `${who}${isYou ? ' (you)' : ''} · ${group.avgPower} W`;
-}
-
-function foldedChip(folded) {
-  const riders = folded.reduce((sum, group) => sum + group.riders.length, 0);
-  const label = riders === folded.length ? `+${riders} solo` : `+${folded.length} groups · ${riders} riders`;
-  return { type: 'fold', label, gap: folded[0].gap };
-}
-
 function laneRoom(laneXs, x) {
   return laneXs.reduce((room, placed) => Math.min(room, Math.abs(placed - x)), Infinity);
 }
@@ -861,41 +448,13 @@ function assignDotLanes(xs, spacing, maxLanes, pinned = []) {
   return lanes;
 }
 
-function buildGroupStrip(groups, yourGroupIndex, time, sampleInterval = 1) {
-  const visible = stripGroupIndexes(groups.length, yourGroupIndex);
-  const items = [];
-  let folded = [];
-  const flush = () => {
-    if (folded.length > 0) items.push(foldedChip(folded));
-    folded = [];
-  };
-  groups.forEach((group, index) => {
-    const gap = groupGapAhead(groups, index, time, sampleInterval);
-    if (!visible.has(index)) {
-      folded.push({ ...group, gap });
-      return;
-    }
-    flush();
-    const isYou = index === yourGroupIndex;
-    items.push({ type: 'group', index, gap, isYou, label: groupChipLabel(group, isYou), zwiftId: group.riders[0].rider.zwiftId });
-  });
-  flush();
-  return items;
-}
-
 // Export for testing and module use
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     formatTime,
     formatTimeGap,
     formatRelativeTime,
-    timeToIndex,
     extractZwiftId,
-    calcSpeed,
-    calcTimeGapFromDistance,
-    calcTimeGap,
-    detectGroups,
-    trackGroups,
     selectRidersToSync,
     clamp,
     escapeHtml,
@@ -914,26 +473,14 @@ if (typeof module !== 'undefined' && module.exports) {
     debounce,
     throttle,
     resolveShortcut,
-    computeRaceStandings,
-    normalizeRiders,
-    calibrateRace,
-    estimateClockOffset,
-    estimateDistanceShift,
-    raceDuration,
-    calcStandingGap,
-    calcGapToGroupAhead,
     advancePlaybackTime,
     resolveWatchedRider,
     buildWatchOptions,
-    shortRiderName,
     buildRiderStatsText,
     buildRiderStatsParts,
     formatOrdinal,
-    nearestRiderGaps,
-    buildGroupStrip,
     assignDotLanes,
     formatGapDuration,
-    DEFAULT_SPEED_KMH,
     MAX_POSITION,
     PLAYBACK_SPEEDS,
     SEEK_STEP_SECONDS,

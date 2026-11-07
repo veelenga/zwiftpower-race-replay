@@ -1,7 +1,8 @@
 const js = require('@eslint/js');
 const globals = require('globals');
 
-const sharedUtils = Object.keys(require('./src/utils'));
+const utilsExports = Object.keys(require('./src/utils'));
+const raceExports = Object.keys(require('./src/race'));
 
 const readonlyGlobals = names => Object.fromEntries(names.map(name => [name, 'readonly']));
 
@@ -32,7 +33,14 @@ module.exports = [
     files: ['src/**/*.js'],
     ignores: ['src/utils.js', 'src/profile-bridge.js'],
     languageOptions: {
-      globals: readonlyGlobals(sharedUtils),
+      globals: readonlyGlobals(utilsExports),
+    },
+  },
+  {
+    files: ['src/**/*.js'],
+    ignores: ['src/utils.js', 'src/race.js', 'src/popup.js', 'src/profile-bridge.js'],
+    languageOptions: {
+      globals: readonlyGlobals(raceExports),
     },
   },
   {
