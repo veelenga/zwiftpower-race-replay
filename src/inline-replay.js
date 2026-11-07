@@ -273,7 +273,8 @@ function placeVisibleDots(view, snapshot) {
 
 function renderInlineDots(view, snapshot) {
   const { hidden, placed } = placeVisibleDots(view, snapshot);
-  const lanes = assignDotLanes(placed.map(dot => dot.x), INLINE_DOT_SPACING_PX, INLINE_MAX_LANES);
+  const pinned = placed.flatMap((dot, i) => (dot.role === 'you' || dot.role === 'leader' ? [i] : []));
+  const lanes = assignDotLanes(placed.map(dot => dot.x), INLINE_DOT_SPACING_PX, INLINE_MAX_LANES, pinned);
   view.dots.forEach(dot => { dot.hidden = true; });
   placed.forEach((dot, i) => {
     const { zwiftId } = dot.standing.rider;
