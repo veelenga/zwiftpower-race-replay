@@ -37,8 +37,5 @@
       "run_at": "document_idle",
       "world": "MAIN"
     }
-  ],
-  "background": {
-    "service_worker": "src/background.js"
-  }
+  ]
 }
