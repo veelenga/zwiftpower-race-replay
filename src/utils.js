@@ -454,6 +454,9 @@ function throttle(fn, intervalMs) {
 const PLAYBACK_SPEEDS = [1, 5, 10, 30];
 const SEEK_STEP_SECONDS = 5;
 const SEEK_SHIFT_STEP_SECONDS = 30;
+const FRAME_STEP_SECONDS = 1;
+const FRAME_SHIFT_STEP_SECONDS = 10;
+const STEP_BUTTONS = [-FRAME_SHIFT_STEP_SECONDS, -FRAME_STEP_SECONDS, FRAME_STEP_SECONDS, FRAME_SHIFT_STEP_SECONDS];
 const TEXT_ENTRY_TAGS = ['SELECT', 'TEXTAREA'];
 const NON_TEXT_INPUT_TYPES = ['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file'];
 const ACTIVATABLE_TAGS = ['BUTTON', 'A', 'SUMMARY'];
@@ -471,10 +474,13 @@ function isActivatableTarget(target) {
 
 function shortcutForKey(key, shiftKey) {
   const seekStep = shiftKey ? SEEK_SHIFT_STEP_SECONDS : SEEK_STEP_SECONDS;
+  const frameStep = shiftKey ? FRAME_SHIFT_STEP_SECONDS : FRAME_STEP_SECONDS;
   switch (key) {
     case ' ': return { type: 'togglePlay' };
     case 'ArrowLeft': return { type: 'seekBy', seconds: -seekStep };
     case 'ArrowRight': return { type: 'seekBy', seconds: seekStep };
+    case ',': case '<': return { type: 'stepBy', seconds: -frameStep };
+    case '.': case '>': return { type: 'stepBy', seconds: frameStep };
     default: return null;
   }
 }
@@ -484,7 +490,7 @@ function resolveShortcut({ key, shiftKey = false, ctrlKey = false, metaKey = fal
   if (key === ' ' && isActivatableTarget(target)) return null;
 
   const action = shortcutForKey(key, shiftKey);
-  if (!action || (repeat && action.type !== 'seekBy')) return null;
+  if (!action || (repeat && action.type === 'togglePlay')) return null;
   return action;
 }
 
@@ -702,5 +708,8 @@ if (typeof module !== 'undefined' && module.exports) {
     PLAYBACK_SPEEDS,
     SEEK_STEP_SECONDS,
     SEEK_SHIFT_STEP_SECONDS,
+    FRAME_STEP_SECONDS,
+    FRAME_SHIFT_STEP_SECONDS,
+    STEP_BUTTONS,
   };
 }

@@ -43,6 +43,8 @@ const {
   DEFAULT_SPEED_KMH,
   SEEK_STEP_SECONDS,
   SEEK_SHIFT_STEP_SECONDS,
+  FRAME_STEP_SECONDS,
+  FRAME_SHIFT_STEP_SECONDS,
 } = require('../src/utils');
 
 describe('formatTime', () => {
@@ -903,6 +905,14 @@ describe('resolveShortcut', () => {
     expect(press('ArrowRight')).toEqual({ type: 'seekBy', seconds: SEEK_STEP_SECONDS });
     expect(press('ArrowLeft', { shiftKey: true })).toEqual({ type: 'seekBy', seconds: -SEEK_SHIFT_STEP_SECONDS });
     expect(press('ArrowRight', { shiftKey: true })).toEqual({ type: 'seekBy', seconds: SEEK_SHIFT_STEP_SECONDS });
+  });
+
+  test('comma and period step one second, ten with shift, and pause playback', () => {
+    expect(press(',')).toEqual({ type: 'stepBy', seconds: -FRAME_STEP_SECONDS });
+    expect(press('.')).toEqual({ type: 'stepBy', seconds: FRAME_STEP_SECONDS });
+    expect(press('<', { shiftKey: true })).toEqual({ type: 'stepBy', seconds: -FRAME_SHIFT_STEP_SECONDS });
+    expect(press('>', { shiftKey: true })).toEqual({ type: 'stepBy', seconds: FRAME_SHIFT_STEP_SECONDS });
+    expect(press('.', { repeat: true })).toEqual({ type: 'stepBy', seconds: FRAME_STEP_SECONDS });
   });
 
   test('returns null for keys without a shortcut', () => {

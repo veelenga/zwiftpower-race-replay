@@ -8,6 +8,8 @@ const INLINE_TOOLTIP_GAP_PX = 10;
 const INLINE_DOT_SPACING_PX = 12;
 const INLINE_LANE_STEP_PX = 12;
 const INLINE_MAX_LANES = 3;
+const INLINE_STEP_HOLD_DELAY_MS = 400;
+const INLINE_STEP_HOLD_INTERVAL_MS = 80;
 const INLINE_HOVER_EVENTS = [
   ['mouseover', 'target'],
   ['focusin', 'target'],
@@ -24,6 +26,9 @@ const INLINE_LAYER_TEMPLATE = `
 const INLINE_BAR_TEMPLATE = `
   <div class="zp-replay-transport">
     <button type="button" class="zp-replay-button zp-replay-play">Play</button>
+    <div class="zp-replay-steps" role="group" aria-label="Step through time">
+      ${STEP_BUTTONS.map(seconds => `<button type="button" class="zp-replay-step" data-step="${seconds}" aria-label="${stepLabel(seconds)}">${stepText(seconds)}</button>`).join('')}
+    </div>
     <span class="zp-replay-time"><span class="zp-replay-time-now"></span><span class="zp-replay-time-total"></span></span>
     <input type="range" class="zp-replay-scrubber" min="0" step="1" value="0" aria-label="Race time">
     <div class="zp-replay-speeds" role="group" aria-label="Playback speed">
@@ -42,6 +47,14 @@ const INLINE_BAR_TEMPLATE = `
     </section>
   </div>`;
 
+function stepText(seconds) {
+  return `${seconds < 0 ? '−' : '+'}${Math.abs(seconds)}s`;
+}
+
+function stepLabel(seconds) {
+  return `${seconds < 0 ? 'Back' : 'Forward'} ${Math.abs(seconds)} second${Math.abs(seconds) === 1 ? '' : 's'}`;
+}
+
 const inlineReplay = {
   raceKey: null,
   riders: [],
@@ -51,6 +64,7 @@ const inlineReplay = {
   time: 0,
   speed: INLINE_DEFAULT_SPEED,
   frameId: null,
+  stepTimer: null,
   hoveredId: null,
   hoveredGroup: null,
   view: null,
@@ -82,6 +96,7 @@ function handleInlineKeydown(event) {
   const action = resolveShortcut(event);
   if (action?.type === 'togglePlay') setInlinePlaying(inlineReplay.frameId === null);
   else if (action?.type === 'seekBy') seekInline(inlineReplay.time + action.seconds);
+  else if (action?.type === 'stepBy') stepInline(action.seconds);
   else return;
   event.preventDefault();
 }
@@ -122,6 +137,7 @@ function createInlineBar() {
     statsMarkup: '',
   };
   bar.play.addEventListener('click', () => setInlinePlaying(inlineReplay.frameId === null));
+  bindStepButtons(element);
   bar.scrubber.addEventListener('input', () => seekInline(Number(bar.scrubber.value)));
   bar.select.addEventListener('change', () => selectWatchedRider(bar.select.value));
   element.addEventListener('click', event => {
@@ -165,6 +181,7 @@ function unmountInlineView() {
   const { view } = inlineReplay;
   if (!view) return;
   setInlinePlaying(false);
+  stopStepHold();
   view.observer.disconnect();
   view.layer.remove();
   view.bar.element.remove();
@@ -389,6 +406,38 @@ function setInlinePlaying(playing) {
 function seekInline(time) {
   inlineReplay.time = clamp(time, 0, inlineReplay.maxTime);
   renderInlineFrame();
+}
+
+function stepInline(seconds) {
+  setInlinePlaying(false);
+  seekInline(inlineReplay.time + seconds);
+}
+
+function stopStepHold() {
+  clearTimeout(inlineReplay.stepTimer);
+  clearInterval(inlineReplay.stepTimer);
+  inlineReplay.stepTimer = null;
+}
+
+function startStepHold(seconds) {
+  stopStepHold();
+  stepInline(seconds);
+  inlineReplay.stepTimer = setTimeout(() => {
+    inlineReplay.stepTimer = setInterval(() => stepInline(seconds), INLINE_STEP_HOLD_INTERVAL_MS);
+  }, INLINE_STEP_HOLD_DELAY_MS);
+}
+
+function bindStepButtons(element) {
+  const stepOf = target => target.closest?.('[data-step]')?.dataset.step;
+  element.addEventListener('pointerdown', event => {
+    const step = stepOf(event.target);
+    if (step && event.button === 0) startStepHold(Number(step));
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(type => element.addEventListener(type, stopStepHold));
+  element.addEventListener('click', event => {
+    const step = stepOf(event.target);
+    if (step && event.detail === 0) stepInline(Number(step));
+  });
 }
 
 function setInlineSpeed(speed) {

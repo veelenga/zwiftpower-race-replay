@@ -46,7 +46,8 @@ A browser extension that syncs Zwift races from ZwiftPower and replays them on t
 4. **Watch the replay**: a sync started from the page plays the replay on the course profile when it finishes. Press "Watch replay" to play it again later
 5. **Explore**:
    - Use the play button, time slider and speed buttons under the profile
-   - Press Space to play or pause and the arrow keys to seek (hold Shift for bigger steps)
+   - Press Space to play or pause and the arrow keys to seek 5 s (30 s with Shift)
+   - Step one second at a time with the −1s / +1s buttons or the `,` and `.` keys (10 s with Shift); hold a button to keep stepping
    - Click a rider on the profile or pick one in "Watching" to follow them
 6. **Come back later**: the extension popup lists synced races; "Open race" opens the race page on ZwiftPower
 
