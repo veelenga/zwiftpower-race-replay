@@ -171,9 +171,8 @@ function trackGroups(standings, time, watchingPosition, { sampleInterval = 1, li
     const rider = standings[i];
     const pair = `${standingId(prevRider)}|${standingId(rider)}`;
     const wasLinked = linked.has(pair);
-    const gapToRider = km => calcTimeGapFromDistance(km - rider.currentDistance, rider, time, sampleInterval);
-    const timeGap = gapToRider(prevRider.currentDistance);
-    const span = gapToRider(currentGroup[0].currentDistance);
+    const timeGap = calcStandingGap(prevRider, rider, time, sampleInterval);
+    const span = calcStandingGap(currentGroup[0], rider, time, sampleInterval);
     const maxGap = wasLinked ? GROUP_GAP_RELEASE_SECONDS : GROUP_GAP_THRESHOLD_SECONDS;
     const maxSpan = wasLinked ? GROUP_MAX_SPAN_RELEASE_SECONDS : GROUP_MAX_SPAN_SECONDS;
 
@@ -512,19 +511,54 @@ function resolveShortcut({ key, shiftKey = false, ctrlKey = false, metaKey = fal
   return action;
 }
 
+function seriesEndTime(rider, sampleInterval = 1) {
+  return Math.max((rider.distance?.length || 0) - 1, 0) * sampleInterval;
+}
+
+function riderFinishTime(rider, sampleInterval = 1) {
+  return rider.finishTime > 0 ? rider.finishTime : seriesEndTime(rider, sampleInterval);
+}
+
+function raceDuration(riders, sampleInterval = 1) {
+  return Math.max(0, ...riders.map(rider => Math.max(riderFinishTime(rider, sampleInterval), seriesEndTime(rider, sampleInterval))));
+}
+
+function distanceAtTime(rider, time, sampleInterval = 1) {
+  const samples = rider.distance || [];
+  const lastIndex = samples.length - 1;
+  const index = timeToIndex(time, sampleInterval);
+  if (index <= lastIndex) return samples[index] || 0;
+  const speedKmPerSecond = calcSpeed(rider, lastIndex * sampleInterval, sampleInterval) / SECONDS_PER_HOUR;
+  return (samples[lastIndex] || 0) + speedKmPerSecond * (time - lastIndex * sampleInterval);
+}
+
+function normalizeRiderDistance(rider, courseKm, sampleInterval = 1) {
+  if (!(rider.finishTime > 0) || !(courseKm > 0) || !rider.distance?.length) return rider;
+  const start = rider.distance[0] || 0;
+  const ridden = distanceAtTime(rider, rider.finishTime, sampleInterval) - start;
+  if (!(ridden > 0)) return rider;
+  const scale = courseKm / ridden;
+  return { ...rider, distance: rider.distance.map(km => (km - start) * scale), finishDistance: courseKm };
+}
+
+function normalizeRiders(riders, courseKm, sampleInterval = 1) {
+  return riders.map(rider => normalizeRiderDistance(rider, courseKm, sampleInterval));
+}
+
 function riderStandingAt(rider, time, sampleInterval) {
   const samples = rider.distance || [];
   const lastIndex = samples.length - 1;
   const index = Math.min(timeToIndex(time, sampleInterval), lastIndex);
-  const finished = index === lastIndex;
+  const finishTime = riderFinishTime(rider, sampleInterval);
+  const finished = time >= finishTime;
   return {
     rider,
     position: rider.position,
     distance: samples,
-    currentDistance: samples[index] || 0,
+    currentDistance: finished ? rider.finishDistance ?? samples[lastIndex] ?? 0 : samples[index] || 0,
     currentPower: finished ? 0 : rider.power?.[index] || 0,
     finished,
-    finishTime: Math.max(lastIndex, 0) * sampleInterval,
+    finishTime,
   };
 }
 
@@ -715,6 +749,8 @@ if (typeof module !== 'undefined' && module.exports) {
     throttle,
     resolveShortcut,
     computeRaceStandings,
+    normalizeRiders,
+    raceDuration,
     calcStandingGap,
     calcGapToGroupAhead,
     advancePlaybackTime,

@@ -57,6 +57,8 @@ function stepLabel(seconds) {
 
 const inlineReplay = {
   raceKey: null,
+  rawRiders: [],
+  courseKm: null,
   riders: [],
   selectedId: null,
   sampleInterval: 1,
@@ -208,6 +210,7 @@ function ensureInlineView() {
   }
   const { view } = inlineReplay;
   view.profile = profile;
+  applyCourse(profile.courseKm);
   Object.assign(view.layer.style, {
     left: `${profile.plotLeft}px`,
     top: `${profile.plotTop}px`,
@@ -456,15 +459,22 @@ function selectWatchedRider(zwiftId) {
   renderInlineFrame();
 }
 
+function applyCourse(courseKm) {
+  if (courseKm === inlineReplay.courseKm) return;
+  inlineReplay.courseKm = courseKm;
+  inlineReplay.riders = normalizeRiders(inlineReplay.rawRiders, courseKm, inlineReplay.sampleInterval);
+}
+
 function setInlineRace(raceKey, race) {
   const isNewRace = raceKey !== inlineReplay.raceKey;
-  const riders = (race?.riders || []).filter(rider => rider.distance?.length > 0);
-  const sampleInterval = riders[0]?.sampleInterval || 1;
-  const maxTime = Math.max(0, ...riders.map(rider => (rider.distance.length - 1) * sampleInterval));
+  const rawRiders = (race?.riders || []).filter(rider => rider.distance?.length > 0);
+  const sampleInterval = rawRiders[0]?.sampleInterval || 1;
+  const maxTime = raceDuration(rawRiders, sampleInterval);
   if (isNewRace) unmountInlineView();
   Object.assign(inlineReplay, {
     raceKey,
-    riders,
+    rawRiders,
+    courseKm: null,
     sampleInterval,
     maxTime,
     selectedId: isNewRace ? null : inlineReplay.selectedId,
@@ -473,6 +483,7 @@ function setInlineRace(raceKey, race) {
     linked: isNewRace ? new Set() : inlineReplay.linked,
     time: isNewRace ? 0 : Math.min(inlineReplay.time, maxTime),
   });
+  applyCourse(readProfile(document.querySelector(INLINE_GRAPH_SELECTOR))?.courseKm ?? null);
   renderInlineReplay();
 }
 

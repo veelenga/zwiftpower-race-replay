@@ -30,6 +30,8 @@ const {
   throttle,
   resolveShortcut,
   computeRaceStandings,
+  normalizeRiders,
+  raceDuration,
   calcStandingGap,
   calcGapToGroupAhead,
   advancePlaybackTime,
@@ -1007,6 +1009,55 @@ describe('computeRaceStandings', () => {
   test('scales time by the sample interval', () => {
     const standings = computeRaceStandings(riders, 2, 2);
     expect(standings.find(s => s.position === 3).currentDistance).toBe(0.5);
+  });
+});
+
+describe('computeRaceStandings with official finish times', () => {
+  const early = { position: 2, zwiftId: 'early', finishTime: 10.4, distance: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], power: Array(13).fill(300) };
+  const winner = { position: 1, zwiftId: 'winner', finishTime: 10.2, distance: [0, 1, 2, 3, 4, 5, 6, 7, 8], power: Array(9).fill(300) };
+
+  test('finishes a rider at the official time even when the series is shorter or longer', () => {
+    const standings = computeRaceStandings([early, winner], 10.3);
+    expect(standings.map(s => s.position)).toEqual([1, 2]);
+    expect(standings[0]).toMatchObject({ finished: true, finishTime: 10.2, currentPower: 0 });
+    expect(standings[1]).toMatchObject({ finished: false, currentDistance: 10 });
+  });
+
+  test('orders finished riders by official time and keeps the official gap', () => {
+    const standings = computeRaceStandings([early, winner], 20);
+    expect(standings.map(s => s.position)).toEqual([1, 2]);
+    expect(calcStandingGap(standings[0], standings[1], 20)).toBe(0);
+    expect(calcStandingGap({ finished: true, finishTime: 2353.4 }, { finished: true, finishTime: 2355.1 }, 2400)).toBe(2);
+  });
+});
+
+describe('normalizeRiders', () => {
+  const rider = { zwiftId: 'a', finishTime: 4, distance: [0.1, 1.1, 2.1, 3.1, 4.1, 5.1] };
+
+  test('scales each rider so the official finish lands on the course length', () => {
+    const [scaled] = normalizeRiders([rider], 2);
+    expect(scaled.distance.map(km => +km.toFixed(3))).toEqual([0, 0.5, 1, 1.5, 2, 2.5]);
+    expect(scaled.finishDistance).toBe(2);
+    expect(rider.distance[0]).toBe(0.1);
+  });
+
+  test('extrapolates when the series stops before the official finish', () => {
+    const short = { zwiftId: 'b', finishTime: 6, distance: [0, 1, 2, 3] };
+    const [scaled] = normalizeRiders([short], 12);
+    expect(scaled.distance).toEqual([0, 2, 4, 6]);
+  });
+
+  test('leaves riders alone without a finish time or a course length', () => {
+    expect(normalizeRiders([{ distance: [0, 1] }], 2)[0]).toEqual({ distance: [0, 1] });
+    expect(normalizeRiders([rider], null)[0]).toBe(rider);
+  });
+});
+
+describe('raceDuration', () => {
+  test('runs until the last official finish or the end of the longest series', () => {
+    expect(raceDuration([{ distance: [0, 1, 2], finishTime: 5 }, { distance: Array(8).fill(0) }])).toBe(7);
+    expect(raceDuration([{ distance: [0, 1, 2], finishTime: 9 }])).toBe(9);
+    expect(raceDuration([])).toBe(0);
   });
 });
 
