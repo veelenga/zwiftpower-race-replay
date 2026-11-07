@@ -18,7 +18,6 @@ const ZWIFT_ID_PATTERN = /z=(\d+)/;
 const TABLE_LOAD_TIMEOUT_MS = 5000;
 const PAGE_INFO_TIMEOUT_MS = 3000;
 const TABLE_POLL_INTERVAL_MS = 200;
-const MAX_VALID_POSITION = 200;
 const MAX_SYNCED_RACES = 15;
 const SYNC_STATUS_KEY = 'syncStatus';
 const SYNCED_RACES_KEY = 'syncedRaces';
@@ -128,12 +127,12 @@ async function waitForTableData(maxWaitMs = TABLE_LOAD_TIMEOUT_MS) {
 
 function findPositionFromCells(cells) {
   if (cells[0]) {
-    const firstCellPos = parsePosition(cells[0].textContent, MAX_VALID_POSITION);
+    const firstCellPos = parsePosition(cells[0].textContent);
     if (firstCellPos) return firstCellPos;
   }
 
   for (const cell of cells) {
-    const pos = parsePosition(cell.textContent, MAX_VALID_POSITION);
+    const pos = parsePosition(cell.textContent);
     if (pos) return pos;
   }
 
@@ -149,7 +148,7 @@ function findPositionFromRow(row) {
   if (tbody) {
     const rows = [...tbody.querySelectorAll('tr')];
     const rowIndex = rows.indexOf(row) + 1;
-    return rowIndex <= MAX_VALID_POSITION ? rowIndex : null;
+    return rowIndex <= MAX_POSITION ? rowIndex : null;
   }
 
   return null;

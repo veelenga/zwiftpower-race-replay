@@ -209,20 +209,23 @@ async function checkCurrentPage() {
   }
 }
 
-/**
- * Start race sync via background service worker
- */
+function sendToPage(action) {
+  return chrome.tabs.sendMessage(currentTabId, { action }).catch(error => {
+    console.log(`[Popup] ${action} failed:`, error.message);
+  });
+}
+
 function startSync() {
   if (!currentTabId) return;
 
   updateSyncProgress({ status: 'starting' });
-  chrome.runtime.sendMessage({ action: 'startSync', tabId: currentTabId });
+  sendToPage('startSync');
 }
 
 function cancelSync() {
   if (!currentTabId) return;
 
-  chrome.runtime.sendMessage({ action: 'cancelSync', tabId: currentTabId });
+  sendToPage('cancelSync');
   updateSyncProgress({ status: 'cancelled' });
 }
 

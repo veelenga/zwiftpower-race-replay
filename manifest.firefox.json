@@ -11,8 +11,7 @@
   },
   "permissions": [
     "storage",
-    "unlimitedStorage",
-    "activeTab"
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "https://zwiftpower.com/*"
@@ -43,8 +42,5 @@
       "run_at": "document_idle",
       "world": "MAIN"
     }
-  ],
-  "background": {
-    "scripts": ["src/background.js"]
-  }
+  ]
 }
