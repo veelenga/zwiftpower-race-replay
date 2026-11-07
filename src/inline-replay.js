@@ -30,7 +30,6 @@ const INLINE_BAR_TEMPLATE = `
   <div class="zp-replay-bar-row">
     <label class="zp-replay-watch">Watching <select class="zp-replay-watch-select"></select></label>
     <span class="zp-replay-stats"></span>
-    <button type="button" class="zp-replay-link zp-replay-open">Open full replay</button>
   </div>`;
 
 const inlineReplay = {
@@ -101,7 +100,6 @@ function createInlineBar() {
   bar.play.addEventListener('click', () => setInlinePlaying(inlineReplay.frameId === null));
   bar.scrubber.addEventListener('input', () => seekInline(Number(bar.scrubber.value)));
   bar.select.addEventListener('change', () => selectWatchedRider(bar.select.value));
-  part('.zp-replay-open').addEventListener('click', openFullInlineReplay);
   element.addEventListener('click', event => {
     const speed = event.target.closest('[data-speed]')?.dataset.speed;
     if (speed) setInlineSpeed(Number(speed));
@@ -342,11 +340,6 @@ function selectWatchedRider(zwiftId) {
   inlineReplay.selectedId = zwiftId;
   renderWatched(inlineReplay.view);
   renderInlineFrame();
-}
-
-function openFullInlineReplay() {
-  setInlinePlaying(false);
-  requestOpenReplay(inlineReplay.raceKey);
 }
 
 function setInlineRace(raceKey, race) {

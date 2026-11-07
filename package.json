@@ -19,8 +19,7 @@
       "js"
     ],
     "collectCoverageFrom": [
-      "src/**/*.js",
-      "!src/lib/**"
+      "src/**/*.js"
     ]
   },
   "repository": {

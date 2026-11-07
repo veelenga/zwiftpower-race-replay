@@ -8,7 +8,7 @@ const readonlyGlobals = names => Object.fromEntries(names.map(name => [name, 're
 const scriptOptions = { ecmaVersion: 2022, sourceType: 'script' };
 
 module.exports = [
-  { ignores: ['node_modules/**', 'dist/**', 'src/lib/**'] },
+  { ignores: ['node_modules/**', 'dist/**'] },
   js.configs.recommended,
   {
     files: ['src/**/*.js'],
@@ -25,7 +25,6 @@ module.exports = [
         ...globals.browser,
         ...globals.webextensions,
         module: 'readonly',
-        Chart: 'readonly',
       },
     },
   },
@@ -46,7 +45,7 @@ module.exports = [
   {
     files: ['src/inline-replay.js'],
     languageOptions: {
-      globals: readonlyGlobals(['getExistingRaceData', 'requestOpenReplay', 'replayControl']),
+      globals: readonlyGlobals(['getExistingRaceData', 'replayControl']),
     },
   },
   {

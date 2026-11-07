@@ -226,12 +226,12 @@ function cancelSync() {
   updateSyncProgress({ status: 'cancelled' });
 }
 
-/**
- * Open replay for a race
- */
-function openReplay(eventId) {
-  const replayUrl = chrome.runtime.getURL(`src/replay.html?eventId=${eventId}`);
-  chrome.tabs.create({ url: replayUrl });
+function eventPageUrl(raceKey) {
+  return `https://zwiftpower.com/events.php?zid=${raceKey.split('_')[0]}`;
+}
+
+function openRace(raceKey) {
+  chrome.tabs.create({ url: eventPageUrl(raceKey) });
 }
 
 /**
@@ -272,8 +272,7 @@ async function loadRaceList() {
   elements.raceList.innerHTML = raceEntries
     .map(([eventId, race]) => {
       const syncIndicator = race.syncInProgress ? ' <span class="sync-indicator">syncing...</span>' : '';
-      const numericEventId = eventId.split('_')[0];
-      const zwiftPowerUrl = `https://zwiftpower.com/events.php?zid=${numericEventId}`;
+      const zwiftPowerUrl = eventPageUrl(eventId);
       return `
       <div class="race-item" data-event-id="${eventId}">
         <div class="race-item-info">
@@ -281,7 +280,7 @@ async function loadRaceList() {
           <div class="race-item-meta">${race.riders?.length || 0} riders | ${formatRelativeTime(race.syncedAt)}${syncIndicator}</div>
         </div>
         <div class="race-item-actions">
-          <button class="btn btn-secondary btn-replay" data-event-id="${eventId}">Replay</button>
+          <button class="btn btn-secondary btn-open" data-event-id="${eventId}">Open race</button>
           <button class="btn btn-danger btn-delete" data-event-id="${eventId}">×</button>
         </div>
       </div>
@@ -290,8 +289,8 @@ async function loadRaceList() {
     .join('');
 
   // Add event listeners
-  elements.raceList.querySelectorAll('.btn-replay').forEach((btn) => {
-    btn.addEventListener('click', () => openReplay(btn.dataset.eventId));
+  elements.raceList.querySelectorAll('.btn-open').forEach((btn) => {
+    btn.addEventListener('click', () => openRace(btn.dataset.eventId));
   });
 
   elements.raceList.querySelectorAll('.btn-delete').forEach((btn) => {

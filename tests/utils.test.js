@@ -11,13 +11,7 @@ const {
   calcTimeGapFromDistance,
   detectGroups,
   selectRidersToSync,
-  isValidPosition,
-  lerp,
   clamp,
-  calcGroupAveragePower,
-  calcGroupAverageHR,
-  filterRidersByName,
-  highlightMatch,
   escapeHtml,
   isValidEventId,
   isValidCategory,
@@ -25,8 +19,6 @@ const {
   parseCategoryFromUrl,
   formatCategoryName,
   parsePosition,
-  findClosestIndex,
-  getValueAtDistance,
   isSyncStatusForEvent,
   isSyncStatusStale,
   buildRaceKey,
@@ -35,9 +27,7 @@ const {
   classifyAnalysisResponse,
   debounce,
   throttle,
-  sampleChartWindow,
   resolveShortcut,
-  stepSpeed,
   computeRaceStandings,
   calcStandingGap,
   calcGapToGroupAhead,
@@ -49,7 +39,6 @@ const {
   DEFAULT_SPEED_KMH,
   SEEK_STEP_SECONDS,
   SEEK_SHIFT_STEP_SECONDS,
-  PLAYBACK_SPEEDS,
 } = require('../src/utils');
 
 describe('formatTime', () => {
@@ -293,40 +282,6 @@ describe('selectRidersToSync', () => {
   });
 });
 
-describe('isValidPosition', () => {
-  test('returns true for valid positions', () => {
-    expect(isValidPosition(1)).toBe(true);
-    expect(isValidPosition(100)).toBe(true);
-    expect(isValidPosition(200)).toBe(true);
-  });
-
-  test('returns falsy for invalid positions', () => {
-    expect(isValidPosition(0)).toBeFalsy();
-    expect(isValidPosition(-1)).toBeFalsy();
-    expect(isValidPosition(201)).toBeFalsy();
-    expect(isValidPosition(null)).toBeFalsy();
-    expect(isValidPosition(undefined)).toBeFalsy();
-  });
-});
-
-describe('lerp', () => {
-  test('interpolates between values', () => {
-    expect(lerp(0, 10, 0)).toBe(0);
-    expect(lerp(0, 10, 0.5)).toBe(5);
-    expect(lerp(0, 10, 1)).toBe(10);
-  });
-
-  test('works with negative values', () => {
-    expect(lerp(-10, 10, 0.5)).toBe(0);
-    expect(lerp(10, -10, 0.5)).toBe(0);
-  });
-
-  test('extrapolates beyond 0-1 range', () => {
-    expect(lerp(0, 10, 2)).toBe(20);
-    expect(lerp(0, 10, -1)).toBe(-10);
-  });
-});
-
 describe('clamp', () => {
   test('returns value when within range', () => {
     expect(clamp(5, 0, 10)).toBe(5);
@@ -340,185 +295,6 @@ describe('clamp', () => {
 
   test('clamps to max when above range', () => {
     expect(clamp(15, 0, 10)).toBe(10);
-  });
-});
-
-describe('calcGroupAveragePower', () => {
-  test('returns empty array for empty or null input', () => {
-    expect(calcGroupAveragePower([])).toEqual([]);
-    expect(calcGroupAveragePower(null)).toEqual([]);
-  });
-
-  test('calculates average power at each time index', () => {
-    const riders = [
-      { power: [100, 200, 300] },
-      { power: [200, 300, 400] },
-    ];
-    expect(calcGroupAveragePower(riders)).toEqual([150, 250, 350]);
-  });
-
-  test('handles different length power arrays', () => {
-    const riders = [
-      { power: [100, 200] },
-      { power: [200, 300, 400] },
-    ];
-    // At index 2, first rider has no data (0), second has 400
-    expect(calcGroupAveragePower(riders)).toEqual([150, 250, 200]);
-  });
-
-  test('handles missing power arrays', () => {
-    const riders = [
-      { power: [100, 200] },
-      { name: 'No power data' },
-    ];
-    expect(calcGroupAveragePower(riders)).toEqual([50, 100]);
-  });
-});
-
-describe('calcGroupAverageHR', () => {
-  test('returns 0 for empty or null input', () => {
-    expect(calcGroupAverageHR([], 0)).toBe(0);
-    expect(calcGroupAverageHR(null, 0)).toBe(0);
-  });
-
-  test('calculates average heart rate at specific index', () => {
-    const riders = [
-      { heartRate: [140, 150, 160] },
-      { heartRate: [160, 170, 180] },
-    ];
-    expect(calcGroupAverageHR(riders, 0)).toBe(150);
-    expect(calcGroupAverageHR(riders, 1)).toBe(160);
-    expect(calcGroupAverageHR(riders, 2)).toBe(170);
-  });
-
-  test('filters out zero values', () => {
-    const riders = [
-      { heartRate: [0, 150, 160] },
-      { heartRate: [160, 170, 0] },
-    ];
-    // At index 0, only second rider has valid HR
-    expect(calcGroupAverageHR(riders, 0)).toBe(160);
-    // At index 2, only first rider has valid HR
-    expect(calcGroupAverageHR(riders, 2)).toBe(160);
-  });
-
-  test('returns 0 when no valid HR data', () => {
-    const riders = [
-      { heartRate: [0, 0, 0] },
-      { heartRate: [0, 0, 0] },
-    ];
-    expect(calcGroupAverageHR(riders, 0)).toBe(0);
-  });
-
-  test('handles missing heartRate arrays', () => {
-    const riders = [
-      { heartRate: [140, 150] },
-      { name: 'No HR data' },
-    ];
-    expect(calcGroupAverageHR(riders, 0)).toBe(140);
-  });
-});
-
-describe('filterRidersByName', () => {
-  const riders = [
-    { name: 'John Smith' },
-    { name: 'Jane Doe' },
-    { name: 'Bob Johnson' },
-  ];
-
-  test('returns all riders for empty search', () => {
-    expect(filterRidersByName(riders, '')).toEqual(riders);
-    expect(filterRidersByName(riders, null)).toEqual(riders);
-    expect(filterRidersByName(riders, '   ')).toEqual(riders);
-  });
-
-  test('filters by partial name match', () => {
-    const result = filterRidersByName(riders, 'john');
-    expect(result.length).toBe(2);
-    expect(result.map(r => r.name)).toEqual(['John Smith', 'Bob Johnson']);
-  });
-
-  test('is case insensitive', () => {
-    expect(filterRidersByName(riders, 'JANE').length).toBe(1);
-    expect(filterRidersByName(riders, 'jane').length).toBe(1);
-    expect(filterRidersByName(riders, 'JaNe').length).toBe(1);
-  });
-
-  test('returns empty array for no matches', () => {
-    expect(filterRidersByName(riders, 'xyz')).toEqual([]);
-  });
-
-  test('handles null/undefined riders array', () => {
-    expect(filterRidersByName(null, 'john')).toEqual([]);
-    expect(filterRidersByName(undefined, 'john')).toEqual([]);
-  });
-});
-
-describe('highlightMatch', () => {
-  test('returns original name for empty search', () => {
-    expect(highlightMatch('John Smith', '')).toBe('John Smith');
-    expect(highlightMatch('John Smith', null)).toBe('John Smith');
-    expect(highlightMatch('John Smith', '   ')).toBe('John Smith');
-  });
-
-  test('wraps match in mark tags', () => {
-    const result = highlightMatch('John Smith', 'Smith');
-    expect(result).toContain('<mark');
-    expect(result).toContain('Smith');
-    expect(result).toContain('</mark>');
-  });
-
-  test('is case insensitive but preserves original case', () => {
-    const result = highlightMatch('John Smith', 'smith');
-    expect(result).toContain('Smith'); // Original case preserved
-    expect(result).toContain('John ');
-  });
-
-  test('highlights first occurrence', () => {
-    const result = highlightMatch('John John', 'John');
-    // Should highlight first John, not second
-    expect(result.indexOf('<mark')).toBe(0);
-  });
-
-  test('returns original if no match', () => {
-    expect(highlightMatch('John Smith', 'xyz')).toBe('John Smith');
-  });
-
-  test('handles null/undefined name', () => {
-    expect(highlightMatch(null, 'test')).toBe('');
-    expect(highlightMatch(undefined, 'test')).toBe('');
-  });
-
-  test('produces exact markup around the match', () => {
-    expect(highlightMatch('John Smith', 'smi')).toBe(
-      'John <mark style="background:#58a6ff33;color:#58a6ff;">Smi</mark>th'
-    );
-  });
-
-  test('uses trimmed search length for the highlighted slice', () => {
-    expect(highlightMatch('John Smith', ' smi ')).toBe(
-      'John <mark style="background:#58a6ff33;color:#58a6ff;">Smi</mark>th'
-    );
-  });
-
-  test('escapes name without a search term', () => {
-    expect(highlightMatch('<b>Bob</b>', '')).toBe('&lt;b&gt;Bob&lt;/b&gt;');
-  });
-
-  test('escapes name when there is no match', () => {
-    expect(highlightMatch('<img src=x onerror=alert(1)>', 'zzz')).toBe(
-      '&lt;img src=x onerror=alert(1)&gt;'
-    );
-  });
-
-  test('escapes text around and inside the mark', () => {
-    expect(highlightMatch('<i>Tom & "Jerry"</i>', '& "j')).toBe(
-      '&lt;i&gt;Tom <mark style="background:#58a6ff33;color:#58a6ff;">&amp; &quot;J</mark>erry&quot;&lt;/i&gt;'
-    );
-  });
-
-  test('matches on raw text rather than escaped entities', () => {
-    expect(highlightMatch('A&B', 'amp')).toBe('A&amp;B');
   });
 });
 
@@ -719,92 +495,6 @@ describe('parsePosition', () => {
   });
 });
 
-describe('findClosestIndex', () => {
-  test('returns -1 for empty array', () => {
-    expect(findClosestIndex([], 5)).toBe(-1);
-    expect(findClosestIndex(null, 5)).toBe(-1);
-    expect(findClosestIndex(undefined, 5)).toBe(-1);
-  });
-
-  test('returns 0 for single element array', () => {
-    expect(findClosestIndex([10], 5)).toBe(0);
-    expect(findClosestIndex([10], 15)).toBe(0);
-  });
-
-  test('finds exact match', () => {
-    expect(findClosestIndex([1, 2, 3, 4, 5], 3)).toBe(2);
-    expect(findClosestIndex([0, 10, 20, 30], 20)).toBe(2);
-  });
-
-  test('finds closest when target is between values', () => {
-    expect(findClosestIndex([0, 10, 20, 30], 12)).toBe(1); // closer to 10
-    expect(findClosestIndex([0, 10, 20, 30], 18)).toBe(2); // closer to 20
-    expect(findClosestIndex([0, 10, 20, 30], 15)).toBe(1); // equidistant, prefer lower
-  });
-
-  test('handles target below range', () => {
-    expect(findClosestIndex([10, 20, 30], 5)).toBe(0);
-    expect(findClosestIndex([10, 20, 30], -100)).toBe(0);
-  });
-
-  test('handles target above range', () => {
-    expect(findClosestIndex([10, 20, 30], 35)).toBe(2);
-    expect(findClosestIndex([10, 20, 30], 1000)).toBe(2);
-  });
-
-  test('works with decimal values', () => {
-    expect(findClosestIndex([0.5, 1.5, 2.5, 3.5], 2.0)).toBe(1); // closer to 1.5
-    expect(findClosestIndex([0.5, 1.5, 2.5, 3.5], 2.3)).toBe(2); // closer to 2.5
-  });
-});
-
-describe('getValueAtDistance', () => {
-  test('returns 0 for empty arrays', () => {
-    expect(getValueAtDistance([], [], 5)).toBe(0);
-    expect(getValueAtDistance(null, [1, 2, 3], 5)).toBe(0);
-    expect(getValueAtDistance([1, 2, 3], null, 5)).toBe(0);
-  });
-
-  test('returns value at exact distance', () => {
-    const distances = [0, 10, 20, 30];
-    const elevations = [100, 150, 200, 180];
-    expect(getValueAtDistance(distances, elevations, 10)).toBe(150);
-    expect(getValueAtDistance(distances, elevations, 20)).toBe(200);
-  });
-
-  test('returns value at closest distance', () => {
-    const distances = [0, 10, 20, 30];
-    const elevations = [100, 150, 200, 180];
-    expect(getValueAtDistance(distances, elevations, 12)).toBe(150); // closer to 10
-    expect(getValueAtDistance(distances, elevations, 18)).toBe(200); // closer to 20
-  });
-
-  test('handles target outside range', () => {
-    const distances = [10, 20, 30];
-    const elevations = [100, 200, 300];
-    expect(getValueAtDistance(distances, elevations, 5)).toBe(100);  // below range
-    expect(getValueAtDistance(distances, elevations, 50)).toBe(300); // above range
-  });
-
-  test('returns 0 for falsy values in data array', () => {
-    const distances = [0, 10, 20];
-    const elevations = [100, 0, 200];
-    expect(getValueAtDistance(distances, elevations, 10)).toBe(0);
-  });
-
-  test('simulates real elevation lookup scenario', () => {
-    // Simulating a rider going faster downhill (more distance per sample)
-    const distances = [0, 0.5, 1.0, 1.8, 2.8, 4.0, 5.5]; // irregular spacing
-    const elevations = [100, 120, 150, 140, 110, 80, 60]; // elevation profile
-
-    // At distance 1.5km: |1.5-1.0|=0.5, |1.5-1.8|=0.3, so 1.8km (idx 3) is closer
-    expect(getValueAtDistance(distances, elevations, 1.5)).toBe(140);
-
-    // At distance 3.0km: |3.0-2.8|=0.2, |3.0-4.0|=1.0, so 2.8km (idx 4) is closer
-    expect(getValueAtDistance(distances, elevations, 3.0)).toBe(110);
-  });
-});
-
 describe('isSyncStatusForEvent', () => {
   test('matches status with the same event ID', () => {
     expect(isSyncStatusForEvent({ status: 'syncing', eventId: '123' }, '123')).toBe(true);
@@ -933,6 +623,29 @@ describe('buildReplayControlState', () => {
       statusText: '46 riders synced',
       isError: false,
     });
+  });
+
+  test('shows a notice for the synced race in place of the summary', () => {
+    const raceSummary = { riderCount: 46, syncInProgress: false };
+    const notice = { raceKey, text: 'Course profile not found on this page' };
+
+    expect(build({ raceSummary, notice })).toEqual({
+      kind: 'synced',
+      buttonLabel: 'Watch replay',
+      progress: null,
+      link: 'resync',
+      statusText: 'Course profile not found on this page',
+      isError: true,
+    });
+  });
+
+  test('ignores a notice of another category or while syncing', () => {
+    const raceSummary = { riderCount: 46, syncInProgress: false };
+    const notice = { raceKey: '123_B', text: 'Course profile not found on this page' };
+    const syncStatus = freshStatus({ status: 'starting' });
+
+    expect(build({ raceSummary, notice }).statusText).toBe('46 riders synced');
+    expect(build({ raceSummary, syncStatus, notice: { ...notice, raceKey } }).statusText).toBe('Preparing riders');
   });
 
   test('marks a synced race whose sync did not finish', () => {
@@ -1173,61 +886,6 @@ describe('throttle', () => {
   });
 });
 
-describe('sampleChartWindow', () => {
-  const rider = {
-    power: [100, 110, 120, 130, 140, 150],
-    heartRate: [90, 0, 120, 130, 140, 150],
-  };
-
-  test('samples power, heart rate and time labels from the window start to the current time', () => {
-    const { labels, series } = sampleChartWindow([rider], 4, { windowSeconds: 10, stepSeconds: 2 });
-
-    expect(labels).toEqual(['0:00', '0:02', '0:04']);
-    expect(series).toEqual([{ power: [100, 120, 140], heartRate: [90, 120, 140] }]);
-  });
-
-  test('starts the window at time minus window size', () => {
-    const { labels, series } = sampleChartWindow([rider], 5, { windowSeconds: 2, stepSeconds: 1 });
-
-    expect(labels).toEqual(['0:03', '0:04', '0:05']);
-    expect(series[0].power).toEqual([130, 140, 150]);
-  });
-
-  test('maps time to data index using the sample interval', () => {
-    const { labels, series } = sampleChartWindow([rider], 10, { windowSeconds: 10, stepSeconds: 5, sampleInterval: 5 });
-
-    expect(labels).toEqual(['0:00', '0:05', '0:10']);
-    expect(series[0].power).toEqual([100, 110, 120]);
-  });
-
-  test('uses zero for missing power and null for missing heart rate', () => {
-    const { series } = sampleChartWindow([rider, {}], 1, { windowSeconds: 10, stepSeconds: 1 });
-
-    expect(series[0].heartRate).toEqual([90, null]);
-    expect(series[1]).toEqual({ power: [0, 0], heartRate: [null, null] });
-  });
-
-  test('returns one series per rider', () => {
-    const { series } = sampleChartWindow([rider, rider, rider], 0, { windowSeconds: 10, stepSeconds: 1 });
-
-    expect(series).toHaveLength(3);
-  });
-
-  test('returns empty data without riders', () => {
-    const { labels, series } = sampleChartWindow([], 2, { windowSeconds: 10, stepSeconds: 1 });
-
-    expect(labels).toEqual(['0:00', '0:01', '0:02']);
-    expect(series).toEqual([]);
-  });
-
-  test('returns empty data for a non positive step', () => {
-    expect(sampleChartWindow([rider], 5, { windowSeconds: 10, stepSeconds: 0 })).toEqual({
-      labels: [],
-      series: [{ power: [], heartRate: [] }],
-    });
-  });
-});
-
 describe('resolveShortcut', () => {
   const body = { tagName: 'BODY' };
   const press = (key, extra = {}) => resolveShortcut({ key, target: body, ...extra });
@@ -1243,24 +901,6 @@ describe('resolveShortcut', () => {
     expect(press('ArrowRight', { shiftKey: true })).toEqual({ type: 'seekBy', seconds: SEEK_SHIFT_STEP_SECONDS });
   });
 
-  test('up and down arrows change speed', () => {
-    expect(press('ArrowUp')).toEqual({ type: 'changeSpeed', step: 1 });
-    expect(press('ArrowDown')).toEqual({ type: 'changeSpeed', step: -1 });
-  });
-
-  test('digits jump to a tenth of the race', () => {
-    expect(press('0')).toEqual({ type: 'seekFraction', fraction: 0 });
-    expect(press('5')).toEqual({ type: 'seekFraction', fraction: 0.5 });
-    expect(press('9')).toEqual({ type: 'seekFraction', fraction: 0.9 });
-  });
-
-  test('maps r, slash and question mark', () => {
-    expect(press('r')).toEqual({ type: 'resetZoom' });
-    expect(press('R', { shiftKey: true })).toEqual({ type: 'resetZoom' });
-    expect(press('/')).toEqual({ type: 'focusSearch' });
-    expect(press('?', { shiftKey: true })).toEqual({ type: 'toggleHelp' });
-  });
-
   test('returns null for keys without a shortcut', () => {
     expect(press('a')).toBeNull();
     expect(press('Enter')).toBeNull();
@@ -1268,28 +908,22 @@ describe('resolveShortcut', () => {
   });
 
   test('ignores keys pressed with ctrl, meta or alt', () => {
-    expect(press('r', { metaKey: true })).toBeNull();
-    expect(press('r', { ctrlKey: true })).toBeNull();
-    expect(press('1', { altKey: true })).toBeNull();
+    expect(press(' ', { metaKey: true })).toBeNull();
+    expect(press(' ', { ctrlKey: true })).toBeNull();
+    expect(press('ArrowLeft', { altKey: true })).toBeNull();
   });
 
   test('ignores shortcuts while typing in text inputs, selects, text areas and editable content', () => {
     expect(press(' ', { target: { tagName: 'INPUT', type: 'text' } })).toBeNull();
-    expect(press('r', { target: { tagName: 'INPUT', type: 'search' } })).toBeNull();
-    expect(press('ArrowDown', { target: { tagName: 'SELECT' } })).toBeNull();
-    expect(press('1', { target: { tagName: 'TEXTAREA' } })).toBeNull();
-    expect(press('/', { target: { tagName: 'DIV', isContentEditable: true } })).toBeNull();
+    expect(press('ArrowLeft', { target: { tagName: 'INPUT', type: 'search' } })).toBeNull();
+    expect(press('ArrowRight', { target: { tagName: 'SELECT' } })).toBeNull();
+    expect(press(' ', { target: { tagName: 'TEXTAREA' } })).toBeNull();
+    expect(press(' ', { target: { tagName: 'DIV', isContentEditable: true } })).toBeNull();
   });
 
   test('keeps shortcuts on non text inputs such as the scrubber', () => {
     expect(press(' ', { target: { tagName: 'INPUT', type: 'range' } })).toEqual({ type: 'togglePlay' });
     expect(press('ArrowRight', { target: { tagName: 'INPUT', type: 'range' } })).toEqual({ type: 'seekBy', seconds: SEEK_STEP_SECONDS });
-  });
-
-  test('escape works everywhere, including while typing', () => {
-    expect(press('Escape')).toEqual({ type: 'escape' });
-    expect(press('Escape', { target: { tagName: 'INPUT', type: 'text' } })).toEqual({ type: 'escape' });
-    expect(press('Escape', { target: { tagName: 'SELECT' } })).toEqual({ type: 'escape' });
   });
 
   test('leaves space to focused buttons and links so they keep native activation', () => {
@@ -1298,33 +932,14 @@ describe('resolveShortcut', () => {
     expect(press('ArrowRight', { target: { tagName: 'BUTTON' } })).toEqual({ type: 'seekBy', seconds: SEEK_STEP_SECONDS });
   });
 
-  test('allows key repeat only for seeking and speed changes', () => {
+  test('allows key repeat only for seeking', () => {
     expect(press('ArrowRight', { repeat: true })).toEqual({ type: 'seekBy', seconds: SEEK_STEP_SECONDS });
-    expect(press('ArrowUp', { repeat: true })).toEqual({ type: 'changeSpeed', step: 1 });
     expect(press(' ', { repeat: true })).toBeNull();
     expect(press('r', { repeat: true })).toBeNull();
   });
 
   test('works without a target', () => {
     expect(resolveShortcut({ key: ' ' })).toEqual({ type: 'togglePlay' });
-  });
-});
-
-describe('stepSpeed', () => {
-  const speeds = PLAYBACK_SPEEDS;
-
-  test('moves to the next or previous speed', () => {
-    expect(stepSpeed(speeds, 10, 1)).toBe(30);
-    expect(stepSpeed(speeds, 10, -1)).toBe(5);
-  });
-
-  test('stays at the ends of the list', () => {
-    expect(stepSpeed(speeds, 30, 1)).toBe(30);
-    expect(stepSpeed(speeds, 1, -1)).toBe(1);
-  });
-
-  test('keeps the current speed when it is not in the list', () => {
-    expect(stepSpeed(speeds, 2, 1)).toBe(2);
   });
 });
 
