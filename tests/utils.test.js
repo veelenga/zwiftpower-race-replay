@@ -36,6 +36,7 @@ const {
   buildWatchOptions,
   shortRiderName,
   buildRiderStatsText,
+  formatOrdinal,
   nearestRiderGaps,
   buildGroupStrip,
   assignDotLanes,
@@ -1064,13 +1065,13 @@ describe('buildRiderStatsText', () => {
   const martin = { name: 'Martin' };
 
   test.each([
-    [{ rank: 12, power: 287, gapToLeader: 14, gapToGroup: 3 }, '#12 · 287 W · +14s to leader · +3s to group'],
-    [{ rank: 20, power: 250, gapToLeader: 75 }, '#20 · 250 W · +1:15 to leader'],
-    [{ rank: 1, power: 310, gapToLeader: 0, gapToGroup: 0, behind: { name: 'Lee', seconds: 2 } }, '#1 · 310 W · 2s ahead of Lee'],
-    [{ rank: 2, power: 300, gapToLeader: 4, ahead: { name: 'Smith', seconds: 4 }, behind: { name: 'Lee', seconds: 0 } }, '#2 · 300 W · +4s to leader · 4s behind Smith'],
-    [{ rank: 5, power: 280, gapToLeader: 14, watchedGap: { ...martin, seconds: 3, ahead: true } }, '#5 · 280 W · +14s to leader · 3s ahead of Martin'],
-    [{ rank: 9, power: 0, watchedGap: { ...martin, seconds: 65, ahead: false } }, '#9 · 0 W · 1:05 behind Martin'],
-    [{ rank: 5, power: 280, watchedGap: { ...martin, seconds: 0, ahead: true } }, '#5 · 280 W'],
+    [{ rank: 12, power: 287, gapToLeader: 14, gapToGroup: 3 }, '12th · 287 W · +14s to leader · +3s to group'],
+    [{ rank: 20, power: 250, gapToLeader: 75 }, '20th · 250 W · +1:15 to leader'],
+    [{ rank: 1, power: 310, gapToLeader: 0, gapToGroup: 0, behind: { name: 'Lee', seconds: 2 } }, '1st · 310 W · 2s ahead of Lee'],
+    [{ rank: 2, power: 300, gapToLeader: 4, ahead: { name: 'Smith', seconds: 4 }, behind: { name: 'Lee', seconds: 0 } }, '2nd · 300 W · +4s to leader · 4s behind Smith'],
+    [{ rank: 5, power: 280, gapToLeader: 14, watchedGap: { ...martin, seconds: 3, ahead: true } }, '5th · 280 W · +14s to leader · 3s ahead of Martin'],
+    [{ rank: 9, power: 0, watchedGap: { ...martin, seconds: 65, ahead: false } }, '9th · 0 W · 1:05 behind Martin'],
+    [{ rank: 5, power: 280, watchedGap: { ...martin, seconds: 0, ahead: true } }, '5th · 280 W'],
     [{}, ''],
   ])('builds %j', (stats, expected) => {
     expect(buildRiderStatsText(stats)).toBe(expected);
@@ -1141,5 +1142,11 @@ describe('assignDotLanes', () => {
   test('reuses the least crowded lane once all lanes are taken', () => {
     expect(assignDotLanes([10, 9, 8, 7, 6], 5, 3)).toEqual([0, 1, 2, 0, 1]);
     expect(assignDotLanes([], 5, 3)).toEqual([]);
+  });
+});
+
+describe('formatOrdinal', () => {
+  test.each([[1, '1st'], [2, '2nd'], [3, '3rd'], [4, '4th'], [11, '11th'], [12, '12th'], [13, '13th'], [21, '21st'], [22, '22nd'], [111, '111th']])('%i -> %s', (rank, expected) => {
+    expect(formatOrdinal(rank)).toBe(expected);
   });
 });

@@ -557,16 +557,26 @@ function formatRiderGap(gap, relation) {
   return gap?.seconds > 0 ? `${formatGapDuration(gap.seconds)} ${relation} ${gap.name}` : null;
 }
 
-function buildRiderStatsText({ rank, power, gapToLeader, gapToGroup, ahead, behind, watchedGap }) {
+function formatOrdinal(rank) {
+  const tens = rank % 100;
+  const suffix = tens >= 11 && tens <= 13 ? 'th' : { 1: 'st', 2: 'nd', 3: 'rd' }[rank % 10] ?? 'th';
+  return `${rank}${suffix}`;
+}
+
+function buildRiderStatsParts({ rank, power, gapToLeader, gapToGroup, ahead, behind, watchedGap }) {
   return [
-    rank > 0 ? `#${rank}` : null,
+    rank > 0 ? formatOrdinal(rank) : null,
     Number.isFinite(power) ? `${power} W` : null,
     formatGapTo(gapToLeader, 'leader'),
     formatGapTo(gapToGroup, 'group'),
     formatRiderGap(ahead, 'behind'),
     formatRiderGap(behind, 'ahead of'),
     watchedGap ? formatRiderGap(watchedGap, watchedGap.ahead ? 'ahead of' : 'behind') : null,
-  ].filter(Boolean).join(' · ');
+  ].filter(Boolean);
+}
+
+function buildRiderStatsText(stats) {
+  return buildRiderStatsParts(stats).join(' · ');
 }
 
 function riderGap(ahead, behind, named, time, sampleInterval) {
@@ -681,6 +691,8 @@ if (typeof module !== 'undefined' && module.exports) {
     buildWatchOptions,
     shortRiderName,
     buildRiderStatsText,
+    buildRiderStatsParts,
+    formatOrdinal,
     nearestRiderGaps,
     buildGroupStrip,
     assignDotLanes,

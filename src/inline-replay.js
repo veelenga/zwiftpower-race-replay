@@ -22,19 +22,25 @@ const INLINE_LAYER_TEMPLATE = `
   <span class="zp-replay-edge-count zp-replay-edge-count-behind" hidden></span>
   <span class="zp-replay-edge-count zp-replay-edge-count-ahead" hidden></span>`;
 const INLINE_BAR_TEMPLATE = `
-  <div class="zp-replay-bar-row">
+  <div class="zp-replay-transport">
     <button type="button" class="zp-replay-button zp-replay-play">Play</button>
-    <span class="zp-replay-time"></span>
+    <span class="zp-replay-time"><span class="zp-replay-time-now"></span><span class="zp-replay-time-total"></span></span>
     <input type="range" class="zp-replay-scrubber" min="0" step="1" value="0" aria-label="Race time">
     <div class="zp-replay-speeds" role="group" aria-label="Playback speed">
       ${PLAYBACK_SPEEDS.map(speed => `<button type="button" class="zp-replay-speed" data-speed="${speed}">${speed}x</button>`).join('')}
     </div>
   </div>
-  <div class="zp-replay-bar-row">
-    <label class="zp-replay-watch">Watching <select class="zp-replay-watch-select"></select></label>
-    <span class="zp-replay-stats"></span>
-  </div>
-  <div class="zp-replay-groups" aria-label="Groups"></div>`;
+  <div class="zp-replay-panels">
+    <section class="zp-replay-panel zp-replay-panel-watch">
+      <label class="zp-replay-caption" for="zp-replay-watch-select">Watching</label>
+      <select class="zp-replay-watch-select" id="zp-replay-watch-select"></select>
+      <div class="zp-replay-stats"></div>
+    </section>
+    <section class="zp-replay-panel zp-replay-panel-groups">
+      <span class="zp-replay-caption">Groups</span>
+      <div class="zp-replay-groups"></div>
+    </section>
+  </div>`;
 
 const inlineReplay = {
   raceKey: null,
@@ -105,13 +111,15 @@ function createInlineBar() {
   const bar = {
     element,
     play: part('.zp-replay-play'),
-    time: part('.zp-replay-time'),
+    timeNow: part('.zp-replay-time-now'),
+    timeTotal: part('.zp-replay-time-total'),
     scrubber: part('.zp-replay-scrubber'),
     speeds: [...element.querySelectorAll('[data-speed]')],
     select: part('.zp-replay-watch-select'),
     stats: part('.zp-replay-stats'),
     groups: part('.zp-replay-groups'),
     groupsMarkup: '',
+    statsMarkup: '',
   };
   bar.play.addEventListener('click', () => setInlinePlaying(inlineReplay.frameId === null));
   bar.scrubber.addEventListener('input', () => seekInline(Number(bar.scrubber.value)));
@@ -296,11 +304,11 @@ function renderInlineTooltip(view, snapshot) {
   view.tooltip.style.transform = tooltipTransform(point, view.profile.plotWidth);
 }
 
-function watchedStatsText({ standings, groups, youIndex, yourGroupIndex, time }) {
-  if (youIndex < 0) return '';
+function watchedStatsParts({ standings, groups, youIndex, yourGroupIndex, time }) {
+  if (youIndex < 0) return [];
   const { sampleInterval } = inlineReplay;
   const you = standings[youIndex];
-  return buildRiderStatsText({
+  return buildRiderStatsParts({
     rank: youIndex + 1,
     power: you.currentPower,
     gapToLeader: calcStandingGap(standings[0], you, time, sampleInterval),
@@ -314,6 +322,13 @@ function groupChipMarkup(item) {
   if (item.type === 'fold') return `${gap}<span class="zp-replay-group zp-replay-group-fold">${escapeHtml(item.label)}</span>`;
   const role = item.isYou ? 'you' : item.index === 0 ? 'lead' : 'other';
   return `${gap}<button type="button" class="zp-replay-group zp-replay-group-${role}" data-group="${item.index}" data-zwift-id="${escapeHtml(item.zwiftId)}">${escapeHtml(item.label)}</button>`;
+}
+
+function renderWatchedStats({ bar }, snapshot) {
+  const markup = watchedStatsParts(snapshot).map(part => `<span class="zp-replay-stat">${escapeHtml(part)}</span>`).join('');
+  if (markup === bar.statsMarkup) return;
+  bar.statsMarkup = markup;
+  bar.stats.innerHTML = markup;
 }
 
 function renderGroupStrip({ bar }, { groups, yourGroupIndex, time }) {
@@ -330,8 +345,9 @@ function renderInlineFrame() {
   renderInlineDots(view, snapshot);
   renderInlineTooltip(view, snapshot);
   renderGroupStrip(view, snapshot);
-  view.bar.stats.textContent = watchedStatsText(snapshot);
-  view.bar.time.textContent = `${formatTime(time)} / ${formatTime(maxTime)}`;
+  renderWatchedStats(view, snapshot);
+  view.bar.timeNow.textContent = formatTime(time);
+  view.bar.timeTotal.textContent = ` / ${formatTime(maxTime)}`;
   view.bar.scrubber.value = String(Math.floor(time));
   view.bar.scrubber.setAttribute('aria-valuetext', formatTime(time));
 }
