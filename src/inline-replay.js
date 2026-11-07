@@ -22,7 +22,8 @@ const INLINE_LAYER_TEMPLATE = `
     <div class="zp-replay-tooltip-stats"></div>
   </div>
   <span class="zp-replay-edge-count zp-replay-edge-count-behind" hidden></span>
-  <span class="zp-replay-edge-count zp-replay-edge-count-ahead" hidden></span>`;
+  <span class="zp-replay-edge-count zp-replay-edge-count-ahead" hidden></span>
+  <span class="zp-replay-finish" hidden>Finish</span>`;
 const INLINE_BAR_TEMPLATE = `
   <div class="zp-replay-transport">
     <button type="button" class="zp-replay-button zp-replay-play">Play</button>
@@ -168,6 +169,7 @@ function mountInlineView(graph) {
     tooltipStats: part('.zp-replay-tooltip-stats'),
     behind: part('.zp-replay-edge-count-behind'),
     ahead: part('.zp-replay-edge-count-ahead'),
+    finish: part('.zp-replay-finish'),
     bar: createInlineBar(),
     dots: new Map(),
     observer: new MutationObserver(() => renderInlineReplay()),
@@ -217,7 +219,14 @@ function ensureInlineView() {
     width: `${profile.plotWidth}px`,
     height: `${profile.plotHeight}px`,
   });
+  placeFinishLine(view, profile);
   return true;
+}
+
+function placeFinishLine({ finish }, { xMin, xMax, plotWidth, courseKm }) {
+  const x = ((courseKm - xMin) / (xMax - xMin)) * plotWidth;
+  finish.hidden = !(x >= 0 && x <= plotWidth);
+  finish.style.transform = `translateX(${x}px)`;
 }
 
 function syncInlineDots(view) {
