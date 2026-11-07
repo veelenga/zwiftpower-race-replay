@@ -1149,9 +1149,14 @@ describe('assignDotLanes', () => {
     expect(assignDotLanes([100, 95, 50, 92, 40], 10, 3)).toEqual([0, 1, 0, 2, 0]);
   });
 
-  test('reuses the least crowded lane once all lanes are taken', () => {
+  test('reuses the lane with the most room once all lanes are taken', () => {
     expect(assignDotLanes([10, 9, 8, 7, 6], 5, 3)).toEqual([0, 1, 2, 0, 1]);
     expect(assignDotLanes([], 5, 3)).toEqual([]);
+  });
+
+  test('keeps pinned dots on the bottom lane and moves the others around them', () => {
+    expect(assignDotLanes([100, 95, 92], 10, 3, [2])).toEqual([1, 2, 0]);
+    expect(assignDotLanes([100, 95, 92], 10, 3, [1])).toEqual([1, 0, 2]);
   });
 });
 

@@ -623,16 +623,22 @@ function foldedChip(folded) {
   return { type: 'fold', label, gap: folded[0].gap };
 }
 
-function assignDotLanes(xs, spacing, maxLanes) {
-  const order = xs.map((x, index) => index).sort((a, b) => xs[b] - xs[a]);
-  const laneEdge = [];
+function laneRoom(laneXs, x) {
+  return laneXs.reduce((room, placed) => Math.min(room, Math.abs(placed - x)), Infinity);
+}
+
+function assignDotLanes(xs, spacing, maxLanes, pinned = []) {
+  const byX = (a, b) => xs[b] - xs[a];
+  const pinnedSet = new Set(pinned);
+  const order = [...pinned].sort(byX).concat(xs.map((x, index) => index).filter(index => !pinnedSet.has(index)).sort(byX));
+  const laneXs = [];
   const lanes = new Array(xs.length).fill(0);
   order.forEach(index => {
     const x = xs[index];
-    let lane = laneEdge.findIndex(edge => edge - x >= spacing);
-    if (lane < 0 && laneEdge.length < maxLanes) lane = laneEdge.length;
-    if (lane < 0) lane = laneEdge.indexOf(Math.max(...laneEdge));
-    laneEdge[lane] = x;
+    let lane = laneXs.findIndex(placed => laneRoom(placed, x) >= spacing);
+    if (lane < 0 && laneXs.length < maxLanes) lane = laneXs.length;
+    if (lane < 0) lane = laneXs.map(placed => laneRoom(placed, x)).reduce((best, room, i, rooms) => (room > rooms[best] ? i : best), 0);
+    (laneXs[lane] ||= []).push(x);
     lanes[index] = lane;
   });
   return lanes;
